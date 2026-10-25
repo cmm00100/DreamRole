@@ -13,7 +13,7 @@ from typing import Any
 
 from .paths import SETTINGS_FILE, DATA, ensure_dirs
 
-APP_VERSION = "1.6.10"
+APP_VERSION = "1.6.11"
 APP_TITLE = "DreamRole"
 
 # ---------------------------------------------------------------------------

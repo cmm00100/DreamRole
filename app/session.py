@@ -1313,7 +1313,14 @@ class Session:
             self.emit(EventType.NOTICE, f"模型没起来：{exc}", payload={"error": True})
             return
 
-        base = modes.system_prompt(self.mode, self.project, self.effective_permission(),
+        # 群聊一律用「自由」那套提示词打底，不管这条会话记的是什么模式。
+        #
+        # 从前这里传的是 self.mode（群聊建出来通常是 craft），于是每位成员拿到的
+        # 开场白是「你是编程 agent，目标是真正做完，写完必须验证」—— 群成员没有工具，
+        # 这句话只会让它反复说「我这就去看一下」，或者把三句讨论写成一份交付清单。
+        # 之前是用一段 _OVERRIDE 硬盖住，那是在给自己找的麻烦上打补丁；
+        # 现在 base 已经是中性的，群聊就该直接用「没有既定任务」的那一档。
+        base = modes.system_prompt("free", self.project, self.effective_permission(),
                                    self.grants)
         rounds = group_mod.rounds_of(group)
         if rounds > 1:

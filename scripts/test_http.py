@@ -114,7 +114,11 @@ def main() -> int:
     print("[1] 启动数据")
     status, boot = call("GET", "/api/bootstrap")
     check("bootstrap 200", status == 200, status)
-    check("有模式清单", len(boot.get("modes") or []) == 4, boot.get("modes"))
+    modes_ = boot.get("modes") or []
+    check("有模式清单", len(modes_) == 5, modes_)
+    # 第五档是「自由」：前四个都是干活模式，用户想随口聊两句时没有可选项。
+    check("模式清单里有「自由」", any(m.get("id") == "free" for m in modes_),
+          [m.get("id") for m in modes_])
     check("有工具清单", len(boot.get("tools") or []) >= 20, len(boot.get("tools") or []))
     check("有提示词模板", len(boot.get("templates") or []) == 5, boot.get("templates"))
     check("静态首页可访问", "DreamRole" in str(call("GET", "/")[1])[:4000])
@@ -616,6 +620,10 @@ def main() -> int:
     check("能给群开一条会话", status == 200 and group_sess.get("cid"), group_sess)
     g_cid = group_sess.get("cid", "")
     check("群会话带上了成员", len(group_sess.get("members") or []) == 2, group_sess.get("members"))
+    # 群聊建在「自由」模式上：成员没有工具，也不是来交付东西的。
+    # 让它顶着「执行」开会，顶栏那枚胶囊会写着「执行」，而这一屋子人只是在讨论。
+    check("群会话建在「自由」模式上（不是执行）",
+          group_sess.get("mode") == "free", group_sess.get("mode"))
 
     call("POST", f"/api/session/{g_cid}/send", {"text": "大家说说该先做什么"})
     group_obj = session_mod.get(g_cid)

@@ -296,8 +296,9 @@ def smoke(exe: Path) -> bool:
                         str([s["name"] for s in payload.get("skills") or []])))
         results.append(("提示词模板已打包", len(payload.get("templates") or []) == 5,
                         str(len(payload.get("templates") or []))))
-        results.append(("模式已就绪", len(payload.get("modes") or []) == 4,
-                        str(len(payload.get("modes") or []))))
+        mode_ids = [m.get("id") for m in payload.get("modes") or []]
+        results.append(("模式已就绪", mode_ids == ["craft", "plan", "ask", "teach", "free"],
+                        str(mode_ids)))
         results.append(("子代理已就绪", len(payload.get("subagents") or []) >= 5,
                         str([s.get("role") for s in payload.get("subagents") or []])))
         results.append(("通道已就绪", len((payload.get("channels") or {}).get("items") or []) == 3,

@@ -2183,7 +2183,12 @@ def scenario_group_talk() -> None:
     check("第一位拿到的是「你先说」，不是「点名回应」",
           "这一轮你先说" in first_sys, first_sys[-200:])
     check("提示词里按住了「用工具/开阶段」那套单干的话术",
-          "没有工具" in first_sys and "一律不适用" in first_sys, "")
+          "没有工具" in first_sys and "不列改动文件" in first_sys, "")
+    # 群聊打底走的是「自由」模式，不是会话自己的 mode。
+    # 从前 base 自称编程 agent，一屋子人开会却在互相「交结论清单」。
+    check("群聊打底用的是「自由」，不再自称编程 agent",
+          "编程 agent" not in first_sys and "写完必须验证" not in first_sys,
+          first_sys[:60])
 
     second = calls[1]
     check("第二位看得到第一位的话，而且是 user 角色（不是 assistant）",

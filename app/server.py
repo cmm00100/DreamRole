@@ -335,7 +335,10 @@ def create_session(payload: dict = Body(default={})) -> Any:
 
     sess = sessions.create(
         project=project,
-        mode=payload.get("mode") or (assistants.get(assistant) or {}).get("mode"),
+        # 群聊一律建在「自由」模式上：成员没有工具，也不是来交付东西的。
+        # 用它自己的 mode（通常是执行）会让顶栏那枚胶囊显示「执行」，
+        # 而这一屋子人实际上只是在开会 —— 标签和行为得对得上。
+        mode="free" if group_id else (payload.get("mode") or (assistants.get(assistant) or {}).get("mode")),
         permission=payload.get("permission") or (assistants.get(assistant) or {}).get("permission"),
         expert=payload.get("expert"),
         assistant=assistant,

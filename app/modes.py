@@ -37,6 +37,17 @@ MODES: dict[str, dict] = {
         "permission": "staged",
         "allow": None,
     },
+    # 自由：没有既定任务，也没有必须交付的东西。
+    # 加它是因为前四个都是「干活模式」的不同档位 —— 最松的问答也仍然要求
+    # 「先给结论再补解释」。用户想随口说两句、或者群成员坐在一起讨论时，
+    # 顶着任何一档都是在把聊天往任务上拽。工具全给，但提示词里明确写了
+    # 「没说去改就别改」—— 能不能用和该不该用是两件事。
+    "free": {
+        "label": "自由",
+        "hint": "想到哪说到哪",
+        "permission": "standard",
+        "allow": None,
+    },
 }
 
 DEFAULT_MODE = "craft"
@@ -47,10 +58,11 @@ _fragment_cache: dict[str, str] = {}
 # 这里不能写成「取更严的那个」：教学模式声明的 staged 比用户默认的 standard 更宽，
 # 取严的话断点永远不触发，教学模式就退化成普通模式了。所以逐个模式显式写清楚：
 #   ask / plan —— 一律只读，跟用户选什么无关（这两个模式本来就不该动文件）
-#   craft      —— 完全听用户的
+#   craft / free —— 完全听用户的
 #   teach      —— 强制分阶段；只有用户明确选了「只读」或「全权」才尊重用户
 MODE_PERMISSION = {
     "craft": lambda user: user,
+    "free": lambda user: user,
     "plan": lambda user: "readonly",
     "ask": lambda user: "readonly",
     "teach": lambda user: user if user in ("readonly", "full") else "staged",

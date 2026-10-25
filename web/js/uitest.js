@@ -1514,6 +1514,16 @@
   const modePop = document.getElementById('modePop');
   check('点模式胶囊弹出模式选择', !modePop.classList.contains('hidden'));
   check('弹出的是真的那几个模式按钮', modePop.querySelectorAll('#modeSwitch button').length === modes.length);
+  /* 第五档「自由」：前四个都是干活模式（最松的问答也要求「先给结论再补解释」），
+     用户想随口聊两句时没有可选项 —— 而把聊天硬拽成任务，正是那种
+     「问了句闲话收到一份工作汇报」的来源。 */
+  const freeMode = modes.find((one) => one.id === 'free');
+  check('模式里有「自由」这一档（不只是四种干活模式）', !!freeMode,
+    modes.map((one) => one.id).join(','));
+  check('自由的说明写的是「随便聊」，不是又一种交付',
+    !!freeMode && /想到哪说到哪/.test(freeMode.hint), freeMode && freeMode.hint);
+  check('自由不是只读 —— 顺手看一眼文件是允许的（只是不该主动开干）',
+    !!freeMode && freeMode.permission !== 'readonly', freeMode && freeMode.permission);
   const wrong = modes.find((one) => one.id !== state.mode);
   if (wrong) {
     modePop.querySelectorAll('#modeSwitch button')[modes.indexOf(wrong)].click();
