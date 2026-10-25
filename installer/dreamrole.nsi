@@ -34,7 +34,7 @@ Unicode true
 ; 版本号与产物路径由外部传入（build_installer.py 从 app/config.py 里读），
 ; 手敲编译时用下面这些默认值。
 !ifndef APP_VERSION
-  !define APP_VERSION "1.6.9"
+  !define APP_VERSION "1.6.10"
 !endif
 !ifndef SRC_EXE
   !define SRC_EXE "..\dist\DreamRole.exe"

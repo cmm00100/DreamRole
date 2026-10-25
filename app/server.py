@@ -1584,7 +1584,9 @@ def create_group(payload: dict = Body(default={})) -> Any:
             rule=payload.get("rule") or "round_robin",
             host=payload.get("host") or "",
             topic=payload.get("topic") or "",
-            rounds=payload.get("rounds") or 1,
+            # 不写 `or 1`：没传就该走默认（group.DEFAULT_ROUNDS），
+            # 写死 1 等于让「各说一句就散会」成为接口层的默认行为。
+            rounds=payload.get("rounds"),
             roles=payload.get("roles") or {},
         )
     except ValueError as exc:

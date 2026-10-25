@@ -2734,6 +2734,23 @@ const Panels = (() => {
       }, '删掉 TA'));
     chat.appendChild(head);
 
+    /* 这个群还停在「各说一句就散会」的时候，在这儿说一句。
+       只改后端不管用：用户不知道要去「改规则」里找那个下拉，
+       打开一看还是三个人各说一段，结论就是「根本没改」。 */
+    if (group && Number(group.rounds || 2) < 2) {
+      chat.appendChild(h('div.tm-thin',
+        h('span.t', '这个群现在各说一句就散会 —— 没有第二遍，就没人回头接上一位。'),
+        h('button.tm-thinb', {
+          onclick: async () => {
+            const res = await API.saveGroup(group.id, { rounds: 2 });
+            if (!res.ok) return toast(res.error, 'bad');
+            toast('改成两轮了：说完会互相接一次', 'good');
+            if (ctx) await ctx.refreshBootstrap();
+            rerender();
+          },
+        }, '改成互相接一次')));
+    }
+
     const msgs = h('div.tm-msgs');
     chat.appendChild(msgs);
 
@@ -3113,9 +3130,12 @@ const Panels = (() => {
     const rule = h('select', Object.keys(rules).map((id) =>
       h('option', { value: id, selected: record && record.rule === id ? 'selected' : null }, rules[id])));
 
-    /* 一轮走几遍。1 是「各说一句就散会」—— 也就是从前的行为，
-       也是「他们各说各话」这个投诉的一部分：说完就散，没有第二个人接。 */
+    /* 一轮走几遍。1 是「各说一句就散会」；默认给 2，因为 1 轮虽然也会把
+       别人的话翻成 user（技术上看得见），但每人只有一次开口机会，说出来的
+       还是「我对这件事的判断」，不是「我对你那句话的看法」。
+       想省 token 就自己选 1 —— 默认值该给「像群聊」的那个。 */
     const maxRounds = data.max_rounds || 3;
+    const defaultRounds = maxRounds >= 2 ? 2 : 1;
     const roundHints = {
       1: '各说一句就散会',
       2: '说完之后互相接一次',
@@ -3124,7 +3144,8 @@ const Panels = (() => {
     const rounds = h('select', Array.from({ length: maxRounds }, (_, i) => i + 1).map((n) =>
       h('option', {
         value: String(n),
-        selected: String(record ? record.rounds || 1 : 1) === String(n) ? 'selected' : null,
+        selected: String(record ? (record.rounds || defaultRounds) : defaultRounds) === String(n)
+          ? 'selected' : null,
       }, n + ' 轮 · ' + (roundHints[n] || ''))));
 
     const host = h('select',

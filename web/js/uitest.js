@@ -1765,8 +1765,11 @@
       check('每一档都写着人话，不是光一个「2」',
         opts.length > 0 && opts.every((one) => /轮\s*·\s*\S/.test(one.textContent)),
         opts.map((one) => one.textContent).join(' | '));
-      check('默认 1 轮 —— 老行为不动，想让他们接着聊才往上调',
-        !!roundSel && roundSel.value === '1', roundSel && roundSel.value);
+      /* 默认必须是 2。1 轮虽然也把别人的话翻成了 user（技术上看得见），
+         但每人只有一次开口机会，说出来的还是「我对这件事的判断」——
+         那正是用户投诉的形状，不能继续当默认。 */
+      check('默认 2 轮 —— 建群就是「说完互相接一次」',
+        !!roundSel && roundSel.value === '2', roundSel && roundSel.value);
 
       /* 上限不写死在前端：后端 MAX_ROUNDS 改了，这里跟着变。
          真跑 99 轮会把一次对话耗成天价，所以选项数必须等于上限。 */
@@ -1941,6 +1944,55 @@
     for (const id of pairs) await API.deleteAssistant(id);
   } catch (err) {
     check('团队页发消息自检跑得下去', false, err && err.message);
+  }
+
+  /* --- 老群还停在「各说一句就散会」时，得当场说一声 ---------------------
+   * 只改后端不管用：用户不知道要去「改规则」里找那个下拉，打开一看还是
+   * 三个人各说一段，结论就是「根本没改」。所以这条提示必须出现在现象旁边。 */
+  try {
+    const ids = [];
+    for (const who of ['己', '庚']) {
+      const got = await API.createAssistant({ name: who, emoji: '🙂' });
+      if (got.ok) ids.push(got.data.assistant.id);
+    }
+    const thin = ids.length === 2
+      ? await API.createGroup({ name: '一轮群', members: ids, rule: 'round_robin', rounds: 1 })
+      : { ok: false };
+
+    if (thin.ok) {
+      const gid = thin.data.group.id;
+      await goSection('assistants');
+      await waitUntil(() => panelHost.querySelectorAll('.tm-chans .tm-ch').length > 0, 8000);
+      const chan = Array.from(panelHost.querySelectorAll('.tm-chans .tm-ch'))
+        .find((node) => node.textContent.includes('一轮群'));
+      if (chan) {
+        chan.click();
+        await pause(400);
+      }
+      const strip = panelHost.querySelector('.tm-thin');
+      check('1 轮的群会被当场指出来（不是让人自己去设置里找）', !!strip,
+        panelHost.textContent.slice(0, 60));
+      check('提示说的是「各说一句就散会」，不是一堆规则名',
+        !!strip && /各说一句就散会/.test(strip.textContent), strip && strip.textContent);
+      const fix = strip && strip.querySelector('.tm-thinb');
+      check('旁边有一颗一键改的按钮', !!fix && /互相接/.test(fix.textContent),
+        fix && fix.textContent);
+
+      if (fix) {
+        fix.click();
+        await pause(900);
+        const after = await API.groups();
+        const saved = ((after.ok && after.data.items) || []).find((one) => one.id === gid);
+        check('点一下就真的改成 2 轮了', !!saved && Number(saved.rounds) === 2,
+          saved && saved.rounds);
+        check('改完这条提示就消失（不留一句已经做过的事）',
+          !panelHost.querySelector('.tm-thin'));
+      }
+      await API.deleteGroup(gid);
+    }
+    for (const id of ids) await API.deleteAssistant(id);
+  } catch (err) {
+    check('一轮群提示自检跑得下去', false, err && err.message);
   }
 
   /* --- 技能：面板里能建、输入栏能选 --- */

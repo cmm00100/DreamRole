@@ -5742,3 +5742,30 @@ pre.code {
 }
 .tm-runb.ghost:hover { background: #46292d; }
 .tm-run.wait .tm-runb { border-color: #4b3d22; background: #2e2717; color: #d3b478; }
+
+/* ---- 「这个群还停在各说一句就散会」的那条提示 ------------------------
+   一条细带子，一屏只出现一次，点一下就没。不做成弹窗，也不藏进设置里 ——
+   它说的是「你现在看到的现象是配置造成的」，那就该出现在现象旁边。 */
+.tm-thin {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 16px 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid #3b3320;
+  background: #221d13;
+  color: #c9b184;
+  font-size: 10.5px;
+}
+.tm-thin .t { flex: 1 1 auto; min-width: 0; }
+.tm-thinb {
+  flex: 0 0 auto;
+  height: 22px; padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid #5a4a28;
+  background: #33290f;
+  color: #e0c58b;
+  font: inherit; font-size: 10px;
+  cursor: pointer;
+}
+.tm-thinb:hover { background: #3f3213; }

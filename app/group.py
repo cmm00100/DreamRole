@@ -36,7 +36,14 @@ _SKIP_RE = re.compile(r"^[\[【(（]?\s*skip\s*[\]】)）]?[。．.!！,，]?$",
 _HEAD_RE = re.compile(r"^\[([^\]\n]{1,40})\]\s?")
 
 MAX_ROUNDS = 3
-DEFAULT_ROUNDS = 1
+# 默认走两遍。
+#
+# 从前默认 1 —— 「各说一句就散会」。那正好是用户投诉的形状：每个人都表态了，
+# 但没有一个人回头接上一位。1 轮虽然已经会把别人的话翻成 `user`（技术上看得见），
+# 可它只有一次开口机会，说出来的还是「我对这件事的判断」，不是「我对你那句话的看法」。
+# 第二遍才是真正的对话：有人反对，有人改条件，有人收口。
+# 想省 token 的人在表单里选 1 就行 —— 默认值该给「像群聊」的那个，而不是最便宜的那个。
+DEFAULT_ROUNDS = 2
 
 
 # ---------------------------------------------------------------------------
@@ -56,9 +63,17 @@ def is_skip(reply: str) -> bool:
 
 
 def rounds_of(group: dict) -> int:
-    """这个群一轮对话走几遍。1~3，脏数据一律退回 1。"""
+    """这个群一轮对话走几遍。1~3。
+
+    **缺字段**（老群，还没有这个设置）跟默认走；显式写了个脏值（0、负数、
+    "abc"）就夹回 1~3 —— 那两种情况的区别很重要：前者是「没设过」，
+    该给个好默认；后者是「设坏了」，别替它猜成 2 轮又花一遍钱。
+    """
+    raw = (group or {}).get("rounds")
+    if raw is None:
+        return DEFAULT_ROUNDS
     try:
-        value = int((group or {}).get("rounds") or DEFAULT_ROUNDS)
+        value = int(raw)
     except (TypeError, ValueError):
         return DEFAULT_ROUNDS
     return max(1, min(value, MAX_ROUNDS))

@@ -326,7 +326,7 @@ def get_group(gid: str) -> dict | None:
 
 def create_group(name: str, members: list[str], rule: str = "round_robin",
                  host: str = "", topic: str = "",
-                 rounds: int = 1, roles: dict | None = None) -> dict:
+                 rounds: int | None = None, roles: dict | None = None) -> dict:
     _ensure()
     picked = [safe_id(a) for a in (members or []) if get(a)]
     if len(picked) < 2:
@@ -343,8 +343,9 @@ def create_group(name: str, members: list[str], rule: str = "round_robin",
         "rule": rule,
         "host": host,
         "topic": str(topic or "").strip()[:400],
-        # 一轮走几遍。1 = 各说一句就散会（从前的行为）；2~3 = 说完还会互相接。
-        # 上限在 group.MAX_ROUNDS，这里只做一次归一。
+        # 一轮走几遍。1 = 各说一句就散会；2~3 = 说完还会互相接。
+        # 默认取 group.DEFAULT_ROUNDS（现在是 2）—— 建群时不传就按「像群聊」那个来，
+        # 上限也在那边。_clean_rounds 只做一次归一。
         "rounds": _clean_rounds(rounds),
         # 每个人**在这个群里**负责什么（提方案 / 挑漏洞 / 收尾）。
         # 不填就退回它自己的 tagline —— 分工不明确，几个人说出来的东西会高度重合。
@@ -356,11 +357,15 @@ def create_group(name: str, members: list[str], rule: str = "round_robin",
 
 
 def _clean_rounds(value) -> int:
-    from .group import MAX_ROUNDS
+    """1~MAX_ROUNDS。**没传**的时候跟着 group.DEFAULT_ROUNDS 走 ——
+    不要在这里写死 1：那等于把「各说一句就散会」焊死成默认行为。"""
+    from .group import DEFAULT_ROUNDS, MAX_ROUNDS
+    if value is None:
+        return DEFAULT_ROUNDS
     try:
-        picked = int(value or 1)
+        picked = int(value)
     except (TypeError, ValueError):
-        return 1
+        return DEFAULT_ROUNDS
     return max(1, min(picked, MAX_ROUNDS))
 
 

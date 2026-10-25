@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-1.6.9-3d63dd">
+  <img alt="version" src="https://img.shields.io/badge/version-1.6.10-3d63dd">
   <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-3776ab">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows-0078d4">
   <img alt="tests" src="https://img.shields.io/badge/tests-1231%20passed-2ea043">
@@ -84,7 +84,7 @@ DreamRole 把它们拆开：
 
 ### 方式一：装
 
-下载 `DreamRole-Setup-1.6.9.exe` → 双击 → 下一步 → 完成。
+下载 `DreamRole-Setup-1.6.10.exe` → 双击 → 下一步 → 完成。
 **不需要管理员权限，不弹 UAC**（按当前用户装）。
 
 | 什么 | 在哪 |
@@ -175,9 +175,9 @@ desktop.py            pywebview 窗口 + 起 uvicorn
 ## 测试
 
 ```bash
-python scripts/selftest.py     # 485 项  端到端：假模型 + 真落盘
+python scripts/selftest.py     # 487 项  端到端：假模型 + 真落盘
 python scripts/test_http.py    # 315 项  所有 HTTP 接口
-python scripts/ui_check.py     # 406 项  真浏览器里跑前端逻辑
+python scripts/ui_check.py     # 411 项  真浏览器里跑前端逻辑
 python scripts/click_check.py  #  51 项  真鼠标点击（命中测试、指针捕获）
 python scripts/test_mcp.py     #  20 项  MCP 客户端与服务端
 python scripts/role2_check.py  #  18 项  role2 那条底层

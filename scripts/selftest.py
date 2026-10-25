@@ -2124,7 +2124,11 @@ def scenario_group_talk() -> None:
     check("弃权认得出来", G.is_skip("[skip]") and G.is_skip(" 【SKIP】 ") and G.is_skip("[skip]。"))
     check("正文里提到 skip 不算弃权", not G.is_skip("这个流程里要加 [skip] 标记"), "")
     check("轮次会被夹在 1~3", G.rounds_of({"rounds": 9}) == G.MAX_ROUNDS
-          and G.rounds_of({"rounds": 0}) == 1 and G.rounds_of({}) == 1)
+          and G.rounds_of({"rounds": 0}) == 1 and G.rounds_of({"rounds": 1}) == 1)
+    # 缺字段的（老群）跟默认走 —— 默认必须是 2：1 轮就是「各说一句就散会」，
+    # 那正是要修的那个现象，不该继续当默认。
+    check("老群里没有 rounds 字段时跟着默认走（2，不是 1）",
+          G.rounds_of({}) == G.DEFAULT_ROUNDS == 2, G.rounds_of({}))
 
     # ---- 2. 真的跑一遍群聊，看每位成员收到了什么 ----
     a = A.create("甲", persona="你只说结论。", emoji="🅰", tagline="提方案")
@@ -2132,6 +2136,10 @@ def scenario_group_talk() -> None:
     grp = A.create_group("自检讨论组", [a["id"], b["id"]], rule="round_robin", rounds=2,
                          roles={a["id"]: "负责提方案", b["id"]: "负责挑漏洞"})
     check("群记住了走几轮", grp.get("rounds") == 2, grp.get("rounds"))
+    bare = A.create_group("默认轮次", [a["id"], b["id"]], rule="round_robin")
+    check("建群不传轮次时按「像群聊」那个来（2 轮），不是各说一句就散会",
+          bare.get("rounds") == 2, bare.get("rounds"))
+    A.remove_group(bare["id"])
     check("群记住了每人分工", (grp.get("roles") or {}).get(b["id"]) == "负责挑漏洞",
           grp.get("roles"))
 
