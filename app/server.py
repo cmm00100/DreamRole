@@ -1569,8 +1569,10 @@ def assistant_stats(aid: str) -> Any:
 
 @app.get("/api/groups")
 def list_groups() -> Any:
+    from .group import MAX_ROUNDS
+
     return _json({"ok": True, "items": assistants.list_groups(),
-                  "rules": assistants.GROUP_RULES})
+                  "rules": assistants.GROUP_RULES, "max_rounds": MAX_ROUNDS})
 
 
 @app.post("/api/groups")
@@ -1582,6 +1584,8 @@ def create_group(payload: dict = Body(default={})) -> Any:
             rule=payload.get("rule") or "round_robin",
             host=payload.get("host") or "",
             topic=payload.get("topic") or "",
+            rounds=payload.get("rounds") or 1,
+            roles=payload.get("roles") or {},
         )
     except ValueError as exc:
         return _fail(str(exc))

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-1.6.8-3d63dd">
+  <img alt="version" src="https://img.shields.io/badge/version-1.6.9-3d63dd">
   <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-3776ab">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows-0078d4">
   <img alt="tests" src="https://img.shields.io/badge/tests-1231%20passed-2ea043">
@@ -84,7 +84,7 @@ DreamRole 把它们拆开：
 
 ### 方式一：装
 
-下载 `DreamRole-Setup-1.6.8.exe` → 双击 → 下一步 → 完成。
+下载 `DreamRole-Setup-1.6.9.exe` → 双击 → 下一步 → 完成。
 **不需要管理员权限，不弹 UAC**（按当前用户装）。
 
 | 什么 | 在哪 |
@@ -133,7 +133,7 @@ python scripts/build_installer.py      # 打包 + 编安装包（要装 NSIS）
 | **过程图** | 一轮一条泳道，一个节点一件事；双击跳进会话流，拖时间轴回放 |
 | **技能** | 只列名字、按需加载正文；能开关，关掉不是删掉 |
 | **专家** | 换的是立场（提问方式、判断标准），不是技能 |
-| **团队** | 助理有人设和自己的屋子；群聊有发言规则 |
+| **团队** | 助理有人设和自己的屋子；群聊有发言规则、可设走几轮、每人分工；回灌时按「我」重分角色，所以他们是**互相**在说 |
 | **自动化** | 定时任务，到点自己跑；不并发、不补跑 |
 | **通道** | 桌面窗口 / 浏览器 / HTTP API / 命令行，同一套内核 |
 | **MCP** | 自实现 JSON-RPC，stdio 和 http 两种传输，零额外依赖 |
@@ -175,9 +175,9 @@ desktop.py            pywebview 窗口 + 起 uvicorn
 ## 测试
 
 ```bash
-python scripts/selftest.py     # 456 项  端到端：假模型 + 真落盘
-python scripts/test_http.py    # 310 项  所有 HTTP 接口
-python scripts/ui_check.py     # 376 项  真浏览器里跑前端逻辑
+python scripts/selftest.py     # 485 项  端到端：假模型 + 真落盘
+python scripts/test_http.py    # 315 项  所有 HTTP 接口
+python scripts/ui_check.py     # 406 项  真浏览器里跑前端逻辑
 python scripts/click_check.py  #  51 项  真鼠标点击（命中测试、指针捕获）
 python scripts/test_mcp.py     #  20 项  MCP 客户端与服务端
 python scripts/role2_check.py  #  18 项  role2 那条底层

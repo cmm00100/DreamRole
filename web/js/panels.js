@@ -19,6 +19,12 @@ const Panels = (() => {
   const memoryState = { id: '' };
   let uid = 0;   // 同一栏可能被重画多次，id 得能分辨
 
+  /* 团队页开着时指向它的「再来一条事件」回调（见 buildTeam）。
+     任何一栏重画都会把它清掉 —— 页面已经不是那一页了，还往回写就是往
+     一个已经被 innerHTML 清空的容器里塞节点，用户什么也看不见，
+     但内存里会一直挂着一整页的旧 DOM。 */
+  let teamFeed = null;
+
   const BUILDERS = {
     search: buildSearch,
     plugins: buildPlugins,
@@ -81,6 +87,8 @@ const Panels = (() => {
     if (tab) current = tab;
     currentSub = sub || '';
     currentHost = host;
+    /* 换页先把上一页的回调摘掉：万一它还在路上，也不该往新页面里写。 */
+    teamFeed = null;
     host.classList.remove('flush');
     host.innerHTML = '';
     host.appendChild(h('div.empty', '读取中…'));
@@ -2741,10 +2749,25 @@ const Panels = (() => {
         onclick: async () => {
           const text = box.value.trim();
           if (!text) return;
+          /* 这一轮还在跑的时候不让再发。
+             不是怕并发 —— 每次发消息本来就是另开一条会话，服务端扛得住。
+             是因为界面只有一条流：再发一句，流切到新会话，上一轮的
+             回答就再也贴不进这间屋子了，用户会以为它说到一半没声了。 */
+          const live = (ctx && ctx.state) || {};
+          if (live.cancelling) return toast('还在停，等它真的停下来再发');
+          if (live.running && following()) {
+            return toast('这一轮还在跑，等它说完再发 —— 或者先按「停下」');
+          }
           const payload = group ? { group: group.id } : { assistant: dmBot ? dmBot.id : '' };
           if (typeof ctx !== 'undefined' && ctx.sendIntoTeam) {
-            const ok = await ctx.sendIntoTeam(payload, text);
-            if (ok) box.value = '';
+            const made = await ctx.sendIntoTeam(payload, text);
+            if (made) {
+              box.value = '';
+              /* 从这一刻起，这间屋子跟的是刚建的那条会话。
+                 不更新的话状态条会一直说「闲着」，而这轮明明在跑。 */
+              if (made.cid) roomCid = made.cid;
+              paintRun();
+            }
           }
         },
       }, '↑')));
@@ -2767,45 +2790,145 @@ const Panels = (() => {
     msgs.appendChild(h('div.tm-hint', '读取最近的对话…'));
 
     const newest = mine.slice().sort((a, b) => (b.updated || 0) - (a.updated || 0))[0];
+
+    /* 一个频道 = 一间屋子，不是一条会话。
+     *
+     * 每次发消息都会新开一条会话（这是有意的：一轮群聊有它自己的权限门、
+     * 自己的停下、自己的轨迹），所以「最新那条会话」里只有最后那一句。
+     * 只画它，用户发第二句时第一句就从墙上消失了 —— 那不是「各说各话」，
+     * 是记忆被擦掉，而且看上去像它把刚才的话忘了。
+     * 这里把最近几次会话拼成一条时间线。取 6 条是上限：再多就是翻旧账，
+     * 而每次发一句话就多一条会话，不封顶的话打开房间要发几十个请求。 */
+    const recent = mine
+      .slice()
+      .sort((a, b) => (b.created || 0) - (a.created || 0))
+      .slice(0, 6)
+      .reverse();
     let events = [];
-    if (newest) {
-      const res = await API.getSession(newest.cid);
-      if (res.ok) events = (res.data && res.data.events) || [];
+    for (const one of recent) {
+      const res = await API.getSession(one.cid);
+      if (!res.ok) continue;
+      const rows = (res.data && res.data.events) || [];
+      rows.forEach((event) => { events.push(event); });
     }
     msgs.innerHTML = '';
 
     /* 系统行：这个频道从什么时候开始有事 */
     if (newest) {
       msgs.appendChild(h('div.tm-sys',
-        h('span.l'), h('span', '最近一次 · ' + relTime(newest.updated || newest.created)), h('span.l')));
+        h('span.l'),
+        h('span', (mine.length > 1 ? '共 ' + mine.length + ' 次对话 · 最后一次 ' : '最近一次 · ')
+          + relTime(newest.updated || newest.created)),
+        h('span.l')));
     } else {
       msgs.appendChild(h('div.tm-empty',
         group ? '这个群还没说过话。下面发一句，成员才会开口。'
           : '还没和它单独说过话。下面发一句试试。'));
     }
 
-    let shown = 0;
-    events.forEach((event) => {
+    /* 一条事件 → 一个气泡。抽出来是因为它有两个调用方：
+       进门时把历史铺一遍，跑起来之后再一条条接上去。 */
+    function msgNode(event) {
       /* 群里成员的发言落盘时是 `answer`（普通会话里才叫 `assistant`）。
          只认 `assistant` 的话，群里永远只有「我」说的话 —— 看着像功能坏了，
          其实是一条事件被过滤掉了。 */
-      if (!['user', 'assistant', 'answer'].includes(event.type)) return;
-      if (!event.content) return;
-      if (shown >= 40) return;
+      if (!['user', 'assistant', 'answer'].includes(event.type)) return null;
+      if (!event.content) return null;
       const member = (event.payload && event.payload.member) || null;
       const isMine = event.type === 'user';
       const who = isMine ? '我' : (member ? member.name : (dmBot ? dmBot.name : '助手'));
       const botId = member ? member.id : (dmBot ? dmBot.id : '');
-      shown += 1;
-      msgs.appendChild(h('div.tm-m2' + (isMine ? '.mine' : ''),
+      return h('div.tm-m2' + (isMine ? '.mine' : ''),
         h('span.av.' + teamAvatar(bots, botId), isMine ? '我' : firstGlyph(member && member.emoji ? member.emoji : who)),
         h('div.c',
           h('div.top',
             h('span.who', who),
             h('span.tm', hhmm(event.ts || event.time)),
             (!isMine && !dmBot) ? h('span.tag3', '队友') : null),
-          h('div.txt2', { html: markdown(event.content) }))));
+          h('div.txt2', { html: markdown(event.content) })));
+    }
+
+    const seen = new Set();
+    let shown = 0;
+    events.forEach((event) => {
+      if (shown >= 40) return;
+      const node = msgNode(event);
+      if (!node) return;
+      shown += 1;
+      if (event.id) seen.add(event.id);
+      msgs.appendChild(node);
     });
+
+    /* ---- 就地跟这一轮：状态条 + 一条接一条地贴上去 ----
+     *
+     * 从前发完消息会整页跳到会话页，理由是「跑的机制都在对话页」。
+     * 那些机制确实在对话页 —— 但用户要的是「接着说话」，不是「去看别人做事」。
+     * 这里只做两件事：把这一条流上的事件接着贴进房间，把「还在跑 / 等你说可以」
+     * 写在输入框上面。真正要下钻的时候，状态条右边那颗「看过程 →」把人送过去。
+     *
+     * 只跟「房间里这条会话」：state 里的 running/pending 说的是当前打开的那条
+     * 会话，频道一换它们就张冠李戴了，所以先比 cid。
+     */
+    let roomCid = newest ? newest.cid : '';
+    const runBar = h('div.tm-run');
+    chat.insertBefore(runBar, gutter);
+
+    function following() {
+      return !!roomCid && (ctx && ctx.state ? ctx.state.cid : '') === roomCid;
+    }
+
+    function paintRun() {
+      const live = following() ? (ctx.state || {}) : {};
+      const beat = live.beat || null;
+      runBar.innerHTML = '';
+      runBar.className = 'tm-run';
+      if (live.cancelling) {
+        runBar.classList.add('on');
+        runBar.appendChild(h('span.dot'));
+        runBar.appendChild(h('span.t',
+          beat && beat.seconds ? `正在停下…（已跑 ${beat.seconds}s）` : '正在停下…'));
+        return;
+      }
+      if (live.pending) {
+        runBar.classList.add('wait');
+        runBar.appendChild(h('span.dot'));
+        runBar.appendChild(h('span.t', '有一步在等你说可以 —— 批了它才会接着做'));
+        runBar.appendChild(h('button.tm-runb', { onclick: () => ctx.gotoSession(roomCid) }, '去点头 →'));
+        return;
+      }
+      if (live.running) {
+        runBar.classList.add('on');
+        runBar.appendChild(h('span.dot'));
+        const who = beat && (beat.label || beat.tool) ? ' · ' + (beat.label || beat.tool) : '';
+        const secs = beat && beat.seconds ? ' ' + beat.seconds + 's' : '';
+        runBar.appendChild(h('span.t', '正在跑' + secs + who));
+        runBar.appendChild(h('button.tm-runb', { onclick: () => ctx.gotoSession(roomCid) }, '看过程 →'));
+        runBar.appendChild(h('button.tm-runb.ghost', { onclick: () => ctx.stopSession() }, '停下'));
+        return;
+      }
+      /* 闲着就不占地方。留一条常驻的「已就绪」等于在说话的时候一直有人插嘴。 */
+      runBar.classList.add('off');
+    }
+
+    /* 接了这条流：新的一句话、新的回答，就地长出来。
+       往上看超过一屏就不跟着滚 —— 用户正在翻上面的记录，不该被拽回底部。 */
+    teamFeed = (message) => {
+      if (!message) return;
+      if (message.kind === 'event') {
+        const event = message.event;
+        if (!event) return;
+        if (event.id && seen.has(event.id)) return;
+        const node = msgNode(event);
+        if (node) {
+          if (event.id) seen.add(event.id);
+          const stick = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 90;
+          msgs.appendChild(node);
+          if (stick) msgs.scrollTop = msgs.scrollHeight;
+        }
+      }
+      if (['event', 'state', 'toolbeat', 'pending'].includes(message.kind)) paintRun();
+    };
+    paintRun();
 
     /* 计划/步骤：事件流里最后一份待办就是「手上的活儿」 */
     let todos = [];
@@ -2990,6 +3113,20 @@ const Panels = (() => {
     const rule = h('select', Object.keys(rules).map((id) =>
       h('option', { value: id, selected: record && record.rule === id ? 'selected' : null }, rules[id])));
 
+    /* 一轮走几遍。1 是「各说一句就散会」—— 也就是从前的行为，
+       也是「他们各说各话」这个投诉的一部分：说完就散，没有第二个人接。 */
+    const maxRounds = data.max_rounds || 3;
+    const roundHints = {
+      1: '各说一句就散会',
+      2: '说完之后互相接一次',
+      3: '接两轮，适合有争议的话题',
+    };
+    const rounds = h('select', Array.from({ length: maxRounds }, (_, i) => i + 1).map((n) =>
+      h('option', {
+        value: String(n),
+        selected: String(record ? record.rounds || 1 : 1) === String(n) ? 'selected' : null,
+      }, n + ' 轮 · ' + (roundHints[n] || ''))));
+
     const host = h('select',
       h('option', { value: '' }, '（第一个成员）'),
       items.map((assistant) =>
@@ -2998,8 +3135,32 @@ const Panels = (() => {
           selected: record && record.host === assistant.id ? 'selected' : null,
         }, (assistant.emoji || '🙂') + ' ' + assistant.name)));
 
+    /* 每个人**在这个群里**负责什么。分工不写，几个人说出来的东西会高度重合 ——
+       豆包那份分析里管这条叫「角色区分度不够」，这是真的会让人以为他们没在听。 */
+    const roles = Object.assign({}, (record && record.roles) || {});
+    const rolesBox = h('div.roleList');
+
+    function paintRoles() {
+      rolesBox.innerHTML = '';
+      const chosen = items.filter((assistant) => picked.has(assistant.id));
+      if (!chosen.length) {
+        rolesBox.appendChild(h('div.roleEmpty', '先选成员，再给每人定个分工'));
+        return;
+      }
+      chosen.forEach((assistant) => {
+        rolesBox.appendChild(h('div.roleRow',
+          h('span.roleWho', (assistant.emoji || '🙂') + ' ' + assistant.name),
+          h('input', {
+            placeholder: '比如「负责挑漏洞」',
+            value: roles[assistant.id] || '',
+            oninput: (event) => { roles[assistant.id] = event.target.value; },
+          })));
+      });
+    }
+
     function paintHost() {
       host.disabled = rule.value !== 'host';
+      paintRoles();
     }
     rule.addEventListener('change', paintHost);
     paintHost();
@@ -3013,6 +3174,8 @@ const Panels = (() => {
         h('div.fieldRow', h('div.fieldLabel', '成员'), picks),
         h('div.fieldRow', h('div.fieldLabel', '规则'), rule),
         h('div.fieldRow', h('div.fieldLabel', '主持人'), host),
+        h('div.fieldRow', h('div.fieldLabel', '走几轮'), rounds),
+        h('div.fieldRow', h('div.fieldLabel', '分工'), rolesBox),
         h('div.fieldRow', h('div.fieldLabel', '话题'), topic)
       ),
       actions: [
@@ -3026,6 +3189,8 @@ const Panels = (() => {
               members: [...picked],
               rule: rule.value,
               host: rule.value === 'host' ? host.value : '',
+              rounds: Number(rounds.value) || 1,
+              roles: roles,
               topic: topic.value.trim(),
             };
             if (payload.members.length < 2) return toast('至少要两个助理', 'bad');
@@ -3522,6 +3687,10 @@ const Panels = (() => {
   return {
     init, open, renderInto, refresh, rerender,
     current() { return current; },
+    /* app.js 那条会话事件流会往这儿递一份：团队页开着就接住，没开着就是 null。
+       用 getter 而不是直接挂属性 —— 团队页每次重画都会把回调换成新的那个，
+       外面拿到的必须永远是「现在这一份」。 */
+    get teamFeed() { return teamFeed; },
     /* 「＋」菜单 / 深链 / 自检用：直接把「新建自动化」的表单顶上来 */
     newSchedule(prompt) { openScheduleEditor(null, prompt || ''); },
     /* 深链与自检用：直接切到自动化页的某一格（list / runs / tpl） */

@@ -325,7 +325,8 @@ def get_group(gid: str) -> dict | None:
 
 
 def create_group(name: str, members: list[str], rule: str = "round_robin",
-                 host: str = "", topic: str = "") -> dict:
+                 host: str = "", topic: str = "",
+                 rounds: int = 1, roles: dict | None = None) -> dict:
     _ensure()
     picked = [safe_id(a) for a in (members or []) if get(a)]
     if len(picked) < 2:
@@ -342,10 +343,38 @@ def create_group(name: str, members: list[str], rule: str = "round_robin",
         "rule": rule,
         "host": host,
         "topic": str(topic or "").strip()[:400],
+        # 一轮走几遍。1 = 各说一句就散会（从前的行为）；2~3 = 说完还会互相接。
+        # 上限在 group.MAX_ROUNDS，这里只做一次归一。
+        "rounds": _clean_rounds(rounds),
+        # 每个人**在这个群里**负责什么（提方案 / 挑漏洞 / 收尾）。
+        # 不填就退回它自己的 tagline —— 分工不明确，几个人说出来的东西会高度重合。
+        "roles": _clean_roles(roles, picked),
         "created": time.time(),
     }
     _write(_group_path(gid), record)
     return record
+
+
+def _clean_rounds(value) -> int:
+    from .group import MAX_ROUNDS
+    try:
+        picked = int(value or 1)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(picked, MAX_ROUNDS))
+
+
+def _clean_roles(roles, members: list[str]) -> dict:
+    """只留还在群里的成员，值截到 60 字。空壳不留。"""
+    if not isinstance(roles, dict):
+        return {}
+    out: dict[str, str] = {}
+    for aid, note in roles.items():
+        key = safe_id(aid)
+        text = " ".join(str(note or "").split())[:60]
+        if key in members and text:
+            out[key] = text
+    return out
 
 
 def update_group(gid: str, **fields) -> dict:
@@ -368,6 +397,13 @@ def update_group(gid: str, **fields) -> dict:
         record["name"] = " ".join(str(fields.get("name") or "").split())[:32] or record["name"]
     if "topic" in fields:
         record["topic"] = str(fields.get("topic") or "").strip()[:400]
+    if "rounds" in fields:
+        record["rounds"] = _clean_rounds(fields.get("rounds"))
+    if "roles" in fields:
+        record["roles"] = _clean_roles(fields.get("roles"), record["members"])
+    # 成员变了，给他配的职责要跟着清 —— 留着「已离职的人负责挑漏洞」没有意义
+    if "roles" not in fields and "members" in fields:
+        record["roles"] = _clean_roles(record.get("roles"), record["members"])
     _write(_group_path(gid), record)
     return record
 
@@ -468,11 +504,14 @@ def stats(aid: str) -> dict:
 
 
 def describe() -> dict:
+    from .group import MAX_ROUNDS
+
     return {
         "ok": True,
         "items": list_all(),
         "groups": list_groups(),
         "starters": STARTERS,
         "rules": GROUP_RULES,
+        "max_rounds": MAX_ROUNDS,
         "home": str(HOME),
     }

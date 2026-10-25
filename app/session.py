@@ -1265,11 +1265,21 @@ class Session:
     def _group_loop(self) -> None:
         """群聊：几个助理对同一段对话依次发言。
 
+        **串行，不并行**。A 说完、写进历史，才轮到 B 读 —— 并行调用会让所有人
+        拿到同一版历史，全都基于用户上一句各答一遍，那正是「各说各话」的另一种成因。
+
+        上下文怎么拼在 `app/group.py` 里，那边解释了为什么别人的话必须变成
+        `user` 而不是 `assistant`（一句话：不改角色，模型会以为那是自己说的）。
+
+        `rounds` > 1 时这一轮会走几遍：第一遍各自表态，第二遍开始互相接。
+        任一轮全员没话就提前结束 —— 接力不能无限下去。
+
         刻意**不给群成员工具**。理由是成本与责任：一轮讨论里四个人各调三次工具，
         谁写了哪个文件、写坏了算谁的，用户根本追不回来。群聊的产出是「看法」，
         真要动手，界面上每位助理旁边都有「单独聊」—— 那才是能干活的入口。
         """
         from . import assistants as A
+        from . import group as group_mod
 
         group = A.get_group(self.group) or {}
         members = A.members_of(group)
@@ -1305,68 +1315,104 @@ class Session:
 
         base = modes.system_prompt(self.mode, self.project, self.effective_permission(),
                                    self.grants)
-        rule = group.get("rule") or "round_robin"
-        host = group.get("host") or ""
-
-        for order, member in enumerate(speakers):
-            if self.cancelled.is_set():
-                raise Cancelled()
-            persona = A.system_note(member)
-            role_hint = "你是这个群里的成员。"
-            if rule == "host":
-                if member["id"] == host and order == 0:
-                    role_hint = "你是主持人。先开个头，把问题拆开，然后请其他人说。"
-                elif member["id"] == host:
-                    role_hint = "你是主持人。把大家说的收一收，给出这个群的结论。"
-            system = "\n\n".join(
-                p for p in (
-                    base,
-                    persona,
-                    role_hint,
-                    "这是群聊：每个人说的话前面都标了是谁说的。只说你要补充的、要反对的、"
-                    "或者要改的地方 —— 不要复述别人刚说过的话。三句话以内。",
-                ) if p
-            )
-            payload_messages = [{"role": "system", "content": system}] + self.messages[1:]
-
-            extra: dict = {}
-            if member.get("model"):
-                extra["model"] = member["model"]
-            try:
-                result = client.chat(
-                    payload_messages,
-                    is_cancelled=self.cancelled.is_set,
-                    temperature=0.6,
-                    **extra,
-                )
-            except LLMError as exc:
-                self.emit(EventType.NOTICE, f"{member.get('name')} 没能说话：{exc}",
-                          payload={"error": True, "member": member["id"]})
-                continue
-            except Cancelled:
-                raise
-
-            reply = (result.get("content") or "").strip()
-            self._bump_usage(result.get("usage") or {})
-            self._merge_pending_usage(result.get("usage") or {})
-            if not reply:
-                continue
+        rounds = group_mod.rounds_of(group)
+        if rounds > 1:
             self.emit(
-                EventType.ANSWER,
-                reply,
-                payload={
-                    "member": {
-                        "id": member["id"],
-                        "name": member.get("name") or member["id"],
-                        "emoji": member.get("emoji") or "🙂",
+                EventType.NOTICE,
+                f"这个群一轮走 {rounds} 遍：各自说完之后还会互相接一次。",
+                payload={"group_rounds": rounds},
+            )
+
+        for round_no in range(1, rounds + 1):
+            spoken: list[str] = []
+            skipped: list[str] = []
+            if round_no > 1:
+                self.emit(EventType.NOTICE, f"第 {round_no} 轮",
+                          payload={"group_round": round_no})
+
+            for index, member in enumerate(speakers):
+                if self.cancelled.is_set():
+                    raise Cancelled()
+                me_name = member.get("name") or member.get("id") or ""
+                system = group_mod.system_for(
+                    base, member, group, members,
+                    speakers=speakers, index=index,
+                    spoken=spoken, round_no=round_no, rounds=rounds,
+                    # 「先接别人的话」这条只在有人说过之后才成立。第一轮的第一位
+                    # 没得接，硬要求它「点名回应」就是逼它编一个对象出来。
+                    first_turn=not group_mod.others_spoke(self.messages[1:], me_name),
+                    persona=A.system_note(member),
+                )
+                payload_messages = (
+                    [{"role": "system", "content": system}]
+                    + group_mod.transcript(self.messages[1:], me_name)
+                )
+
+                extra: dict = {}
+                if member.get("model"):
+                    extra["model"] = member["model"]
+                try:
+                    result = client.chat(
+                        payload_messages,
+                        is_cancelled=self.cancelled.is_set,
+                        temperature=0.6,
+                        **extra,
+                    )
+                except LLMError as exc:
+                    self.emit(EventType.NOTICE, f"{member.get('name')} 没能说话：{exc}",
+                              payload={"error": True, "member": member["id"]})
+                    continue
+                except Cancelled:
+                    raise
+
+                reply = (result.get("content") or "").strip()
+                self._bump_usage(result.get("usage") or {})
+                self._merge_pending_usage(result.get("usage") or {})
+                if not reply:
+                    continue
+
+                # 弃权。**不写进历史、不出现在对话里** —— 一个「我说不出新东西」
+                # 的气泡，除了让屏幕更长没有任何用处。只在轮末说一句谁没接。
+                if group_mod.is_skip(reply):
+                    skipped.append(me_name)
+                    continue
+
+                self.emit(
+                    EventType.ANSWER,
+                    reply,
+                    payload={
+                        "member": {
+                            "id": member["id"],
+                            "name": member.get("name") or member["id"],
+                            "emoji": member.get("emoji") or "🙂",
+                        },
+                        "group": self.group,
+                        "round": round_no,
+                        "rounds": rounds,
                     },
-                    "group": self.group,
-                },
-            )
-            # 后面的人要看得见前面说了什么，所以带上前缀存进上下文
-            self.messages.append(
-                {"role": "assistant", "content": f"[{member.get('name')}] {reply}"}
-            )
+                )
+                # 后面的人要看得见前面说了什么，所以带上前缀存进上下文。
+                # 注意这里存的是 `assistant` —— 那是「存储格式」；
+                # 发给某一位成员时会由 group.transcript() 按「我」重新分配角色。
+                self.messages.append(
+                    {"role": "assistant", "content": f"[{me_name}] {reply}"}
+                )
+                spoken.append(me_name)
+
+            if skipped:
+                # 全员弃权不要逐个点名 —— 那不是「谁没接话」，是「这轮聊完了」。
+                whole = len(skipped) >= len(speakers)
+                if whole and round_no > 1:
+                    text = f"第 {round_no} 轮没人有补充，讨论到这儿。"
+                elif whole:
+                    text = "这轮谁都没有要补充的。"
+                else:
+                    text = "没接话：" + "、".join(skipped) + " —— 觉得没有新东西可说"
+                self.emit(EventType.NOTICE, text,
+                          payload={"group_skipped": skipped, "group_round": round_no})
+            # 一轮下来没人开口，再走一轮也是同样的结果。停在这儿。
+            if not spoken:
+                break
 
         if self.assistant:
             A.touch(self.assistant, 1)

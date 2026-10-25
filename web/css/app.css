@@ -5682,3 +5682,63 @@ pre.code {
   cursor: progress;
 }
 #stopBtn:disabled:hover { background: #3a2225; }
+
+/* ---- 群里每人的分工 ---------------------------------------------------
+   一行一个人：左边是谁，右边「在这个群里负责什么」。
+   不写分工的话，几个成员说出来的东西会高度重合 —— 看着像没在听，
+   其实是几个人被问到了同一个问题、又都按自己的通用人设去答。 */
+.roleList { display: flex; flex-direction: column; gap: 6px; }
+.roleRow {
+  display: flex; align-items: center; gap: 8px;
+}
+.roleWho {
+  flex: 0 0 118px;
+  font-size: 12px; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.roleRow input { flex: 1 1 auto; min-width: 0; }
+.roleEmpty {
+  font-size: 11.5px; color: var(--text-3);
+  padding: 4px 0;
+}
+
+/* ---- 团队页的状态条：这一轮在跑，就地告诉你 --------------------------
+   发完消息不再把页面弹到会话页，所以「它在动」这件事得在房间里说清楚：
+   左边一颗会呼吸的点，中间一句现在在干什么，右边一个出口（看过程 / 停下）。
+   闲着时整条收成 0 高 —— 常驻一条「已就绪」等于说话时一直有人插嘴。 */
+.tm-run {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 16px 8px;
+  font-size: 10.5px; color: #9aa0a8;
+}
+.tm-run.off { display: none; }
+.tm-run .t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-run .dot {
+  flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%;
+  background: #6b7280;
+}
+.tm-run.on { color: #8fc7a8; }
+.tm-run.on .dot { background: #4ea87a; animation: tmPulse 1.6s ease-in-out infinite; }
+.tm-run.wait { color: #d3b478; }
+.tm-run.wait .dot { background: #c79a45; animation: tmPulse 1.6s ease-in-out infinite; }
+@keyframes tmPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .35; transform: scale(.72); }
+}
+.tm-runb {
+  flex: 0 0 auto;
+  height: 21px; padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid #33513f;
+  background: #1b2b22;
+  color: #8fc7a8;
+  font: inherit; font-size: 10px;
+  cursor: pointer;
+}
+.tm-runb:hover { background: #22362b; }
+.tm-runb.ghost {
+  border-color: #4a2a2e; background: #3a2225; color: #a9787b;
+}
+.tm-runb.ghost:hover { background: #46292d; }
+.tm-run.wait .tm-runb { border-color: #4b3d22; background: #2e2717; color: #d3b478; }

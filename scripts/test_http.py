@@ -628,6 +628,30 @@ def main() -> int:
     check("每句话都标了是谁说的",
           all((e.get("payload") or {}).get("member", {}).get("name") for e in speakers), speakers[:1])
 
+    # ---- 走几轮 + 每人分工 ----
+    # 用户投诉「他们各说各话」，有一部分原因是这里只能走一轮：
+    # 各自说完就散会，不存在「第二个人接第一个人的话」这一幕。
+    _status, g_list = call("GET", "/api/groups")
+    check("群接口把轮次上限告诉前端（表单别写死 3）",
+          isinstance(g_list.get("max_rounds"), int) and g_list["max_rounds"] >= 2,
+          g_list.get("max_rounds"))
+
+    status, two_rounds = call("PATCH", f"/api/groups/{gid}", {"rounds": 2})
+    check("能把群改成走两轮",
+          status == 200 and (two_rounds.get("group") or {}).get("rounds") == 2, two_rounds)
+
+    status, clamped = call("PATCH", f"/api/groups/{gid}", {"rounds": 99})
+    check("轮次会被夹到上限，真跑 99 遍会把人耗死",
+          (clamped.get("group") or {}).get("rounds") == g_list["max_rounds"], clamped)
+
+    status, with_roles = call("PATCH", f"/api/groups/{gid}", {
+        "roles": {aid: "负责提方案", bid: "负责挑漏洞", "a-not-exist": "负责做梦"},
+    })
+    stored_roles = (with_roles.get("group") or {}).get("roles") or {}
+    check("能记下每人在群里的分工", stored_roles.get(aid) == "负责提方案", stored_roles)
+    check("不在群里的人不会被记进分工", "a-not-exist" not in stored_roles, stored_roles)
+    call("PATCH", f"/api/groups/{gid}", {"rounds": 1})
+
     status, mention = call("PATCH", f"/api/groups/{gid}", {"rule": "mention"})
     check("能把规则改成「只让点名的说」",
           status == 200 and (mention.get("group") or {}).get("rule") == "mention", mention)

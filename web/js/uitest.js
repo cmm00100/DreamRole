@@ -1728,6 +1728,221 @@
     check('群聊自检跑得下去', false, err && err.message);
   }
 
+  /* --- 群聊表单：走几轮 + 每人分工 -------------------------------------
+   * 后端把「别人的话翻成 user」「没有补充就 [skip]」都改好了，但如果表单里
+   * 定不了轮次、也定不了分工，下一轮还是三份雷同的话 —— 用户看到的现象不变。
+   * 这一节验的是：这两件事在界面上真的能设，而且设完真的进库。 */
+  try {
+    const pack = [];
+    for (const who of ['甲', '乙', '丙']) {
+      const got = await API.createAssistant({ name: who, emoji: '🙂' });
+      if (got.ok) pack.push(got.data.assistant.id);
+    }
+
+    if (pack.length >= 3) {
+      await goSection('assistants');
+      await waitUntil(() => panelHost.querySelectorAll('.tm-chans .tm-plus').length >= 1, 8000);
+      const plus = panelHost.querySelector('.tm-chans .tm-sec .tm-plus');
+      check('团队页的「＋」还在（建群的入口）', !!plus);
+
+      plus.click();
+      await pause(350);
+
+      const card = document.querySelector('#modalCard');
+      const fields = Array.from((card || document).querySelectorAll('.fieldRow'));
+      const labelOf = (row) => {
+        const node = row.querySelector('.fieldLabel');
+        return node ? node.textContent.trim() : '';
+      };
+      const roundsRow = fields.find((row) => labelOf(row) === '走几轮');
+      const rolesRow = fields.find((row) => labelOf(row) === '分工');
+      check('建群表单里有「走几轮」这一栏', !!roundsRow);
+      check('建群表单里有「分工」这一栏', !!rolesRow);
+
+      const roundSel = roundsRow && roundsRow.querySelector('select');
+      const opts = roundSel ? Array.from(roundSel.options) : [];
+      check('轮次给的是几档可选，不是一个数字', opts.length >= 2, opts.length);
+      check('每一档都写着人话，不是光一个「2」',
+        opts.length > 0 && opts.every((one) => /轮\s*·\s*\S/.test(one.textContent)),
+        opts.map((one) => one.textContent).join(' | '));
+      check('默认 1 轮 —— 老行为不动，想让他们接着聊才往上调',
+        !!roundSel && roundSel.value === '1', roundSel && roundSel.value);
+
+      /* 上限不写死在前端：后端 MAX_ROUNDS 改了，这里跟着变。
+         真跑 99 轮会把一次对话耗成天价，所以选项数必须等于上限。 */
+      const listed = await API.groups();
+      const cap = (listed.ok && listed.data.max_rounds) || 0;
+      check('下拉的档数等于后端给的轮次上限（没写死）', cap > 0 && cap === opts.length,
+        `${cap} vs ${opts.length}`);
+
+      const roleRows = () => (rolesRow ? Array.from(rolesRow.querySelectorAll('.roleRow')) : []);
+      check('选了两个人，就摆两行分工', roleRows().length === 2, roleRows().length);
+      check('每一行分工都写着这是谁',
+        roleRows().length > 0 && roleRows().every((row) => !!row.querySelector('.roleWho')),
+        roleRows().map((row) => row.textContent.slice(0, 8)).join('|'));
+
+      // 勾上第三个成员 → 分工跟着多一行（paintRoles 真的被调到了）
+      const boxes = Array.from(card.querySelectorAll('.pickChip input[type=checkbox]'));
+      const spare = boxes.find((one) => !one.checked);
+      if (spare) {
+        spare.checked = true;
+        spare.dispatchEvent(new Event('change', { bubbles: true }));
+        await pause(150);
+      }
+      check('勾进一个人，分工立刻多一行', roleRows().length === 3, roleRows().length);
+
+      // 全勾掉 → 不摆空行，只说一句
+      boxes.forEach((one) => {
+        one.checked = false;
+        one.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      await pause(150);
+      check('一个人都没选时不摆一排空框，只说一句提示',
+        roleRows().length === 0 && !!rolesRow.querySelector('.roleEmpty'),
+        roleRows().length);
+
+      // 回到两个人，各写一句分工，再挑 2 轮
+      boxes[0].checked = true;
+      boxes[1].checked = true;
+      boxes.forEach((one) => one.dispatchEvent(new Event('change', { bubbles: true })));
+      await pause(150);
+
+      const words = ['负责挑漏洞', '负责收口'];
+      roleRows().forEach((row, i) => {
+        const input = row.querySelector('input');
+        input.value = words[i] || '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      roundSel.value = '2';
+      roundSel.dispatchEvent(new Event('change', { bubbles: true }));
+
+      const nameInput = fields.find((row) => labelOf(row) === '群名').querySelector('input');
+      nameInput.value = '自检带轮次';
+      const build = Array.from(card.querySelectorAll('button'))
+        .find((node) => node.textContent.trim() === '建群');
+      check('表单底部有「建群」', !!build);
+      if (build) build.click();
+      await pause(700);
+
+      const after = await API.groups();
+      const made = ((after.ok && after.data.items) || []).find((one) => one.name === '自检带轮次');
+      check('表单填的东西真建成了群', !!made, after.error);
+      check('轮次存进去了', !!made && Number(made.rounds) === 2, made && made.rounds);
+      check('分工按人存进去了', !!made && Object.keys(made.roles || {}).length === 2,
+        made && JSON.stringify(made.roles));
+      check('存的分工就是填的那两句',
+        !!made && Object.values(made.roles || {}).join('|') === words.join('|'),
+        made && Object.values(made.roles || {}).join('|'));
+
+      if (made) await API.deleteGroup(made.id);
+    }
+    for (const id of pack) await API.deleteAssistant(id);
+  } catch (err) {
+    check('群表单自检跑得下去', false, err && err.message);
+  }
+
+  /* --- 团队页发消息：人留在这间屋子里 -----------------------------------
+   * 用户原话：「在群聊里发消息，页面就会自动跳出到会话页面，很突兀」。
+   * 这里验两件事：发完不跳；想追过程的时候才跳（「看过程 →」）。
+   * 状态条的三态直接往团队页那条回调里递 —— still 模式下没有事件流，
+   * 真跑一轮看不到，但状态条本身对不对是可以验的。 */
+  try {
+    const pairs = [];
+    for (const who of ['丁', '戊']) {
+      const got = await API.createAssistant({ name: who, emoji: '🙂' });
+      if (got.ok) pairs.push(got.data.assistant.id);
+    }
+    const madeGroup = pairs.length === 2
+      ? await API.createGroup({ name: '落脚点', members: pairs, rule: 'round_robin', rounds: 2 })
+      : { ok: false };
+
+    if (madeGroup.ok) {
+      const gid = madeGroup.data.group.id;
+      await goSection('assistants');
+      await waitUntil(() => panelHost.querySelectorAll('.tm-chans .tm-ch').length > 0, 8000);
+      const chan = Array.from(panelHost.querySelectorAll('.tm-chans .tm-ch'))
+        .find((node) => node.textContent.includes('落脚点'));
+      if (chan) {
+        chan.click();
+        await pause(400);
+      }
+
+      const roomInput = document.querySelector('.tm-input');
+      check('团队页有个能打字的框', !!roomInput);
+      roomInput.value = '在群里说一句，看它走不走';
+      document.querySelector('.tm-send').click();
+      await waitUntil(() => !!state.cid && state.group === gid, 10000);
+
+      check('这句话真发出去了（会话建起来了）', !!state.cid && state.group === gid, state.group);
+      check('发完还留在团队页 —— 这就是「不突兀」',
+        Panels.current() === 'assistants', Panels.current());
+      check('团队页也没被藏起来',
+        !panelHost.classList.contains('hidden'), panelHost.className);
+
+      const bar = document.querySelector('.tm-run');
+      check('房间里有一条状态条（在跑 / 等你说可以都写在这儿）', !!bar);
+
+      /* 三态：在跑 / 要点头 / 闲着。
+         走真正的 handleStream 而不是直接喂团队页 —— 这样验的还有一件事：
+         同一条流上的消息到底有没有被递到团队页去。 */
+      const keep = { running: state.running, beat: state.beat, pending: state.pending };
+      handleStream({ kind: 'state', running: true });
+      handleStream({ kind: 'toolbeat', tool: 'read_file', label: '戊', seconds: 7 });
+      check('跑起来时它写着「正在跑」和秒数',
+        /正在跑/.test(bar.textContent) && /7s/.test(bar.textContent), bar.textContent);
+      check('想追过程时有「看过程 →」这颗出口',
+        Array.from(bar.querySelectorAll('.tm-runb')).some((node) => node.textContent.includes('看过程')),
+        bar.textContent);
+      check('也给了「停下」（不用回会话页才能按住它）',
+        Array.from(bar.querySelectorAll('.tm-runb')).some((node) => node.textContent === '停下'),
+        bar.textContent);
+
+      handleStream({ kind: 'pending', request: { id: 'uitest-ask', tool: 'write_file', arguments: {} } });
+      check('有一步要点头时，状态条改成「等你说可以」',
+        /等你说可以/.test(bar.textContent), bar.textContent);
+      check('这会儿的出口是「去点头 →」（不是「看过程」）',
+        Array.from(bar.querySelectorAll('.tm-runb')).some((node) => node.textContent.includes('去点头')));
+
+      handleStream({ kind: 'pending_gone', id: 'uitest-ask' });
+      handleStream({ kind: 'state', running: false });
+      check('闲下来时状态条收起来，不白占一行', bar.classList.contains('off'), bar.className);
+
+      /* 新的一句话长出来 —— 「留在团队页」的前提是它在别处也看得见。 */
+      const before = document.querySelectorAll('.tm-msgs .tm-m2').length;
+      handleStream({
+        kind: 'event',
+        event: {
+          id: 'uitest-team-say', type: 'answer', ts: Math.floor(Date.now() / 1000),
+          content: '这条只在这间屋子里出现', payload: { member: { id: pairs[0], name: '丁', emoji: '🙂' } },
+        },
+      });
+      check('跑起来之后新的一句就长在房间里（不用切页面）',
+        document.querySelectorAll('.tm-msgs .tm-m2').length > before,
+        before + ' → ' + document.querySelectorAll('.tm-msgs .tm-m2').length);
+      check('长出来的那句带着说话人',
+        Array.from(document.querySelectorAll('.tm-msgs .tm-m2')).some((node) =>
+          node.textContent.includes('这条只在这间屋子里出现') && node.textContent.includes('丁')));
+
+      state.running = keep.running;
+      state.beat = keep.beat;
+      state.pending = keep.pending;
+
+      /* 出口：点了才走。
+         判据是那一栏真的被让出来了（团队页收起、会话页亮出来），
+         不是 Panels 自己的 current —— 那是「上次画过哪一页」的记账。 */
+      await AppFacade.gotoSession(state.cid);
+      await pause(300);
+      check('「看过程」这类出口，点了才切到会话页',
+        Sidebar.active() === 'sessions' && panelHost.classList.contains('hidden'),
+        Sidebar.active() + ' / ' + panelHost.className);
+
+      await API.deleteGroup(gid);
+    }
+    for (const id of pairs) await API.deleteAssistant(id);
+  } catch (err) {
+    check('团队页发消息自检跑得下去', false, err && err.message);
+  }
+
   /* --- 技能：面板里能建、输入栏能选 --- */
   try {
     /* 1. 技能面板必须有「新建技能」入口。之前技能是只能看不能加的，

@@ -937,7 +937,25 @@ function connectStream(cid, fresh) {
   );
 }
 
+/* 事件流来了。改写状态的是 applyStream；外面这层只多做一件事：
+ * 处理完之后把同一条消息递给团队页。
+ *
+ * 必须是**之后**：团队页的状态条读的是 state.running / state.beat，
+ * 而这两样正是 switch 里写进去的。递在前面，它看到的永远是上一条消息
+ * 留下的状态 —— 状态条会慢半拍，而且"跑完了"和"又在跑"会同时成立一瞬。
+ *
+ * 也不给它另开一条 SSE：另开就是两个订阅源、两份会话态，迟早出现
+ * 「团队页说还在跑、对话页说停了」。这里只是把同一条消息多递一份出去。
+ */
 function handleStream(message) {
+  try {
+    applyStream(message);
+  } finally {
+    if (typeof Panels !== 'undefined' && Panels.teamFeed) Panels.teamFeed(message);
+  }
+}
+
+function applyStream(message) {
   switch (message.kind) {
     case 'event': {
       const event = message.event;
@@ -4057,29 +4075,48 @@ const AppFacade = {
      点「聊」就是开一条带人设的会话，行为跟别的会话一模一样。
      这里原来也不许在「这一轮还在跑」的时候开，同样去掉了：
      开一条新会话和上一条跑不跑没有关系。 */
-  async openWith(payload) {
+  async openWith(payload, opts) {
+    const stay = !!(opts && opts.stay);
     const result = await API.createSession(payload);
     if (!result.ok) return toast(result.error, 'bad');
     await renderTraces();
     await openTrace(result.data.cid);
-    Sidebar.show('sessions');
-    $('#input').focus();
+    /* 从团队页发消息时不挪页面（stay）。
+       这里的原话是「在群聊里发一句，页面就跳到会话页，很突兀」——
+       跳走的代价不是一次点击，是用户刚看着的那一屋子人突然不见了，
+       他还得自己走回来才知道刚才那句有没有人接。 */
+    if (!stay) {
+      Sidebar.show('sessions');
+      $('#input').focus();
+    }
     return result.data;
   },
   /* 团队页的输入框：开（或续）一条群聊/私聊，再把这句话发出去。
    *
-   * 为什么不直接在这个页面里发：一轮群聊要真跑起来才有意义，而「跑」这件事
-   * 的全部机制（流、权限门、停下、待办条）都在对话页里。团队页做完「派活」这一步，
-   * 就交给对话页 —— 用户看到的是同一件事，不是一个只在团队页里活着的假聊天。
+   * 跑起来之后页面**留在团队页**：那间屋子、那几个人、刚才说到哪，
+   * 都是用户当下在看的东西。要追过程有「看过程 →」一颗按钮，
+   * 想过去的时候才过去 —— 而不是每次开口都被弹走。
    */
   async sendIntoTeam(payload, text) {
-    const made = await this.openWith(payload);
+    const made = await this.openWith(payload, { stay: true });
     if (!made) return false;
     $('#input').value = text;
     autoGrow($('#input'));
     updateComposer();
     await send();
-    return true;
+    return made;
+  },
+  /* 团队页的「看过程 →」：不是跳转，是把对话页叫到前面来。
+     那条会话一直在被同一条流更新，所以过去就是「已经在跑」的样子。 */
+  async gotoSession(cid) {
+    if (!cid) return;
+    await openTrace(cid);
+    Sidebar.show('sessions');
+    $('#input').focus();
+  },
+  /* 团队页的「停下」：和对话页那颗按钮走同一条路，不另写一套。 */
+  async stopSession() {
+    return stop();
   },
   /* 面板里改了东西之后，让左栏按新数据重画一次 */
   refreshSidebar() {

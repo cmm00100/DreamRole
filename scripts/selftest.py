@@ -2082,6 +2082,136 @@ def scenario_engines() -> None:
     r2._proc = None
 
 
+def scenario_group_talk() -> None:
+    """群聊：他们到底有没有看见彼此。
+
+    这一节是照着一个具体投诉写的：「智能体团有群聊，但用起来他们各说各话」。
+
+    病根不在广播，也不在并发（`_group_loop` 一直是串行的）。病根是**角色**：
+    群成员的每句话都以 `assistant` 存进历史，于是 B 读到的
+    `assistant: [甲] 先做第二项` 在模型眼里是**它自己**说过的话。
+    它没有「对面坐着人」这个概念，只能接着自己的话往下说。
+
+    所以下面验三件事：别人的话是 `user`、名册和顺序进了提示词、没话说能弃权。
+    """
+    from app import assistants as A
+    from app import group as G
+    from app import session as S2
+
+    print("\n--- 群聊：他们真的看见彼此 ---")
+
+    # ---- 1. 纯函数：拆台词、翻角色 ----
+    check("能从「[名字] 正文」里拆出说话人", G.split_utterance("[小明] 你好") == ("小明", "你好"))
+    check("不是这个形状就不硬拆", G.split_utterance("普通一句话") is None, "")
+
+    history = [
+        {"role": "user", "content": "这周推进什么？"},
+        {"role": "assistant", "content": "[小明] 砍掉第二项。"},
+        {"role": "assistant", "content": "[小红] 我不同意。"},
+    ]
+    as_red = G.transcript(history, "小红")
+    check("自己说的保持 assistant（那是我的话）",
+          as_red[2]["role"] == "assistant" and as_red[2]["content"] == "我不同意。", as_red[2])
+    check("别人说的翻成 user —— 这一条不改，模型永远以为是自己说的",
+          as_red[1]["role"] == "user" and as_red[1]["content"].startswith("【小明】"), as_red[1])
+    check("人类那句也带标签，否则和同伴的话分不清",
+          as_red[0]["role"] == "user" and as_red[0]["content"].startswith("【用户】"), as_red[0])
+
+    solo = [{"role": "user", "content": "问"}, {"role": "assistant", "content": "[小明] 答"}]
+    check("能判断「有没有别人说过话」", G.others_spoke(solo, "小红") is True)
+    check("全是自己的发言就不算", G.others_spoke(solo[1:], "小明") is False)
+
+    check("弃权认得出来", G.is_skip("[skip]") and G.is_skip(" 【SKIP】 ") and G.is_skip("[skip]。"))
+    check("正文里提到 skip 不算弃权", not G.is_skip("这个流程里要加 [skip] 标记"), "")
+    check("轮次会被夹在 1~3", G.rounds_of({"rounds": 9}) == G.MAX_ROUNDS
+          and G.rounds_of({"rounds": 0}) == 1 and G.rounds_of({}) == 1)
+
+    # ---- 2. 真的跑一遍群聊，看每位成员收到了什么 ----
+    a = A.create("甲", persona="你只说结论。", emoji="🅰", tagline="提方案")
+    b = A.create("乙", persona="你专门挑漏洞。", emoji="🅱", tagline="挑漏洞")
+    grp = A.create_group("自检讨论组", [a["id"], b["id"]], rule="round_robin", rounds=2,
+                         roles={a["id"]: "负责提方案", b["id"]: "负责挑漏洞"})
+    check("群记住了走几轮", grp.get("rounds") == 2, grp.get("rounds"))
+    check("群记住了每人分工", (grp.get("roles") or {}).get(b["id"]) == "负责挑漏洞",
+          grp.get("roles"))
+
+    calls: list[list[dict]] = []
+
+    class Script:
+        def __init__(self, conn=None):
+            self.conn = {"provider": "deepseek", "base_url": "http://127.0.0.1:1",
+                         "api_key": "x"}
+            self.model = "fake"
+
+        def chat(self, messages, **kw):
+            calls.append(messages)
+            if len(calls) == 1:
+                return {"content": "先做第二项，第一项下周再说。", "usage": {}, "tool_calls": []}
+            if len(calls) == 2:
+                return {"content": "第二项风险最大，我反对。", "usage": {}, "tool_calls": []}
+            return {"content": "[skip]", "usage": {}, "tool_calls": []}
+
+    real = S2.ChatClient
+    S2.ChatClient = Script
+    talk = SANDBOX / "g-talk"
+    talk.mkdir(exist_ok=True)
+    try:
+        sess = S2.create(project=str(talk), mode="craft", permission="full",
+                         group=grp["id"], members=grp["members"])
+        sess.start("这周推进什么？", [])
+        sess.wait_idle(40)
+    finally:
+        S2.ChatClient = real
+
+    check("两个成员各说一次、第 2 轮都弃权就停（共 4 次调用）", len(calls) == 4, len(calls))
+
+    def system_of(index: int) -> str:
+        return next((m["content"] for m in calls[index] if m["role"] == "system"), "")
+
+    first_sys = system_of(0)
+    check("提示词里有名册（不然它没法「反对某人」）", "## 这个群：自检讨论组" in first_sys
+          and "挑漏洞" in first_sys, first_sys[:60])
+    check("提示词里写了分工", "负责挑漏洞" in first_sys, "")
+    check("第一位拿到的是「你先说」，不是「点名回应」",
+          "这一轮你先说" in first_sys, first_sys[-200:])
+    check("提示词里按住了「用工具/开阶段」那套单干的话术",
+          "没有工具" in first_sys and "一律不适用" in first_sys, "")
+
+    second = calls[1]
+    check("第二位看得到第一位的话，而且是 user 角色（不是 assistant）",
+          any(m["role"] == "user" and "【甲】" in (m["content"] or "") for m in second),
+          [m["role"] for m in second])
+    check("第二位被要求点名回应", "先接别人的话" in system_of(1), "")
+    check("第二位知道自己是第几个（顺序里标了「你」）",
+          "**你**" in system_of(1), "")
+
+    later = calls[2]
+    check("第 2 轮里，自己上一轮的话是 assistant（那是我说的）",
+          any(m["role"] == "assistant" and "第二项" in (m["content"] or "") for m in later),
+          [m["role"] for m in later])
+    check("第 2 轮里，别人上一轮的话是 user",
+          any(m["role"] == "user" and "【乙】" in (m["content"] or "") for m in later),
+          "")
+
+    answers = [e for e in sess.events if e.type == "answer" and (e.payload or {}).get("member")]
+    check("两条发言都带说话人", len(answers) == 2, len(answers))
+    check("发言里标了轮次", any((e.payload or {}).get("round") == 1 for e in answers), "")
+    check("弃权的不进对话（不然屏幕上全是「我说不出新东西」）",
+          not any("[skip]" in (e.content or "") for e in sess.events), "")
+    check("弃权的也不写进历史", not any("[skip]" in (m.get("content") or "") for m in sess.messages), "")
+    check("全员弃权的那一轮会收尾，而不是再走一轮",
+          any("没人有补充" in (e.content or "") for e in sess.events),
+          [e.content[:20] for e in sess.events if e.type == "notice"][-3:])
+
+    # ---- 3. 分工和轮次是能改的，成员走了职责要跟着清 ----
+    A.update_group(grp["id"], rounds=1)
+    check("轮次能改回 1", (A.get_group(grp["id"]) or {}).get("rounds") == 1, "")
+    A.update_group(grp["id"], members=[a["id"], A.create("丙")["id"]])
+    left = A.get_group(grp["id"]) or {}
+    check("成员被移出之后，他的分工不会留在群里装样子",
+          b["id"] not in (left.get("roles") or {}), left.get("roles"))
+
+
 def scenario_stop() -> None:
     """点「停下」之后，到底多久才真的停；长命令跑起来有没有动静。
 
@@ -2227,6 +2357,7 @@ def main() -> int:
     scenario_software()
     scenario_regressions()
     scenario_skills_and_concurrency()
+    scenario_group_talk()
     scenario_stop()
 
     print("\n" + "=" * 56)
