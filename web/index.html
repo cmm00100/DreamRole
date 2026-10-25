@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DreamRole</title>
+<link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- 顶栏照设计稿做成一条 34px 的菜单栏：应用 / 编辑 / 视图 + 命令面板。
+       原来这一条 52px，挤着工作区、模式、视图、专家、产物五组控件 ——
+       它们各自都有更该待的地方（工作区归面包屑、模式归中栏头胶囊、
+       产物归右栏），挤在一起的结果是每一样都只有半只眼睛看得见。 -->
+  <header class="topbar">
+    <button class="menuBtn" data-menu="app">应用</button>
+    <button class="menuBtn" data-menu="edit">编辑</button>
+    <button class="menuBtn" data-menu="view">视图</button>
+    <div class="grow"></div>
+    <button class="cmdk" id="paletteBtn"><kbd>⌘K</kbd> 命令面板</button>
+
+    <!-- 三个下拉。控件本身没消失，只是搬进来：元素和 id 都还是原来那个。 -->
+    <div class="menuPop hidden" id="menuApp">
+      <button class="mi" id="openSettingsBtn">设置…</button>
+      <button class="mi" id="cmdBtn">命令面板 <span class="k">⌘K</span></button>
+      <div class="sep"></div>
+      <button class="mi" id="aboutBtn">关于 DreamRole</button>
+    </div>
+    <div class="menuPop hidden" id="menuEdit">
+      <button class="mi" id="undoBtn">撤销输入 <span class="k">⌘Z</span></button>
+      <button class="mi" id="clearInputBtn">清空输入框</button>
+      <div class="sep"></div>
+      <button class="mi" id="copyLastBtn">复制最后一条回答</button>
+    </div>
+    <div class="menuPop hidden" id="menuView">
+      <button class="mi" id="toggleSideBtn">收起 / 展开左栏 <span class="k">⌘B</span></button>
+      <button class="mi" id="toggleRightItem">收起 / 展开右栏</button>
+      <div class="sep"></div>
+      <button class="mi" id="artifactsBtn">这个对话的产物
+        <span class="k artCount hidden" id="artCount"></span></button>
+      <button class="mi hidden" id="expertBtn" title="当前专家（点击更换）">
+        <span id="expertEmoji">🧩</span><span id="expertName">专家</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="body">
+    <!-- 左栏：一列到底。
+         以前是「图标条 + 内容列」两段 —— 图标条只有图标，内容列只有内容，
+         于是「都有什么功能」要靠悬停一个个认。设计稿的做法是把一级导航
+         直接摆进这一列（带计数），会话树放在它下面，一屏之内看完。 -->
+    <aside class="side" id="side">
+      <div class="brand">
+        <span class="mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="17" height="17"><path d="M12 2l2.2 6.1L20.5 10l-5 4.1 1.6 6.4L12 17l-5.1 3.5L8.5 14l-5-4.1 6.3-1.9z" fill="currentColor"/></svg>
+        </span>
+        <span class="brandName">DreamRole</span>
+        <span class="brandVer" id="version"></span>
+        <span class="grow"></span>
+        <button class="icBtn" id="sideWide" title="把这一栏放宽一点">
+          <svg viewBox="0 0 24 24" width="13" height="13"><path d="M9 4H4v5M15 20h5v-5M20 9V4h-5M4 15v5h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+
+      <!-- 两个快捷入口。类名不叫 primary：那一套在 app.css 里是「弹窗主按钮」
+           （蓝底 + 白字），拿来当容器名会把整块染成蓝色。 -->
+      <div class="quick">
+        <button class="newChat" id="newSession">
+          <svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+          <span>新会话</span>
+          <kbd>Ctrl N</kbd>
+        </button>
+        <button class="searchBox" id="searchBtn">
+          <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M15 15l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <span>搜索会话、命令、文件</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+      </div>
+
+      <!-- 一级导航由 Sidebar 画：每一项都带计数，一眼看到「有哪些区、各有多少」 -->
+      <nav class="nav" id="nav" aria-label="功能区"></nav>
+
+      <div class="treeWrap">
+        <div class="treeHead">
+          <span class="treeTitle" id="sideTitle">会话</span>
+          <span class="grow"></span>
+          <button class="icBtn" id="showArchived" title="把归档的也算进来">⇅</button>
+          <button class="icBtn" id="newSessionTop" title="新建会话">＋</button>
+        </div>
+        <div class="traceList" id="traceList"></div>
+      </div>
+
+      <div class="sideFoot">
+        <button class="gear" id="gearBtn" title="设置">
+          <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 2.8l1.2 2.4 2.6-.5.6 2.6 2.4 1.2-1.4 2.3 1.4 2.3-2.4 1.2-.6 2.6-2.6-.5L12 21.2l-1.2-2.4-2.6.5-.6-2.6L5.2 15.5l1.4-2.3-1.4-2.3 2.4-1.2.6-2.6 2.6.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="meBtn" id="meBtn" title="本地 · 一条会话一个目录">
+          <i aria-hidden="true">我</i>
+          <span>本地</span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main" id="main">
+      <!-- 中栏头挂在 main 下面，不挂在会话流里：视图切换就在这条头上，
+           塞进某一屏的话，切到流程图之后再想切回来就没有入口了。
+           它也是「这一屏的主语」：在哪个工作区的哪条会话、以及这一屏怎么看。 -->
+      <div class="chead">
+        <div class="cheadMain">
+          <!-- 面包屑就是工作区换目录的入口：它写的就是「我现在在哪」，
+               点它改「在哪」比在顶栏再摆一个路径按钮直接。 -->
+          <button class="bc" id="projectBtn" title="点一下换工作目录"><span id="bcPath">会话</span></button>
+          <div class="tiRow">
+            <div class="ti" id="chatTitle">新会话</div>
+            <div class="cPills" id="chatPills"></div>
+            <!-- 模式也是一枚胶囊：设计稿里「创造模式」就长在这儿 -->
+            <button class="cPill" id="modePill" title="交互模式">创造模式</button>
+            <div class="menuPop hidden" id="modePop">
+              <div class="seg" id="modeSwitch" role="tablist" aria-label="交互模式"></div>
+            </div>
+          </div>
+        </div>
+        <div id="speakerChip" class="hidden"></div>
+        <!-- 视图切换就摆在中栏头上：它是「这一屏看什么」，跟标题是同一件事。
+             以前它藏在顶栏的菜单里，等于把第一层的选择埋进了第二层。 -->
+        <div class="views" id="viewSwitch">
+          <button class="vw on" data-view="chat">▤ 会话流</button>
+          <button class="vw" data-view="graph">⌗ 流程图</button>
+        </div>
+        <div class="grow"></div>
+        <button class="cbtn" id="retryBtn" title="用同一句话重跑一遍（Alt+R）">
+          <svg viewBox="0 0 24 24" width="14" height="14"><path d="M19 12a7 7 0 11-2.1-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M19 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="cbtn" id="artifactsTopBtn" title="这个对话产出了哪些文件">
+          <svg viewBox="0 0 24 24" width="14" height="14"><path d="M4 7h16M4 12h16M4 17h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <button class="cbtn" id="moreBtn" title="更多">
+          <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="6" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="18" cy="12" r="1.5" fill="currentColor"/></svg>
+        </button>
+        <div class="menuPop hidden" id="chatMenu">
+          <button class="mi" id="exportBtn">导出这次会话</button>
+          <button class="mi" id="renameBtn">重命名…</button>
+          <button class="mi" id="pickProjectBtn">换工作区…</button>
+          <div class="sep"></div>
+          <button class="mi" id="rpanelBtn">收起 / 展开右栏</button>
+          <button class="mi" id="openArtifactsBtn">看全部产物</button>
+          <div class="sep"></div>
+          <button class="mi" id="archiveBtn">归档这条会话</button>
+          <button class="mi danger" id="deleteBtn">删除这条会话</button>
+        </div>
+      </div>
+      <section class="view view-chat" id="viewChat">
+        <div class="feed" id="feed"></div>
+      </section>
+      <section class="view view-graph hidden" id="viewGraph">
+        <!-- 工具条：左边「看什么」（筛选），右边「怎么看」（镜头）。
+             筛选是真筛：关掉的那一类节点就不画，不是画淡。 -->
+        <div class="graphBar">
+          <div class="graphTitle" id="graphTitle">还没有节点</div>
+          <button class="tb on" id="filterTool" title="工具调用节点（关掉就看不到了）">工具</button>
+          <button class="tb on" id="filterSub" title="子代理节点">子代理</button>
+          <button class="tb on" id="filterAppr" title="审批节点">审批</button>
+          <button class="tb on" id="filterOut" title="写文件的产出节点">产出</button>
+          <div class="grow"></div>
+          <label class="gFollow" title="新节点出现时，镜头跟着过去">
+            <input type="checkbox" id="followToggle" checked />
+            实时跟随
+          </label>
+          <!-- 粒度：长会话一步一个节点会连成一条长蛇，切成「轮次」之后
+               一轮一张卡，点开还是能看到这一轮的全部步骤。 -->
+          <div class="gGran" id="graphGran" title="一步一个节点，还是一轮一个节点">
+            <button class="tb on" data-detail="step">步骤</button>
+            <button class="tb" data-detail="round">轮次</button>
+          </div>
+          <button class="tb" id="zoomOut" title="缩小">−</button>
+          <span class="zoomLabel" id="zoomLabel">100%</span>
+          <button class="tb" id="zoomIn" title="放大">+</button>
+          <button class="tb" id="fitBtn" title="把整张图框回视野（双击画布也行）">⌖ 适应</button>
+          <button class="tb" id="copyMermaid" title="复制成一段 Mermaid，贴到哪儿都能画">复制 Mermaid</button>
+        </div>
+        <div class="graphHost" id="graphHost" title="点一下节点，看这一步的完整过程">
+          <div class="empty">这里会把「怎么一步步做成的」画成一张图。<br />一轮一条泳道，点节点看全文。</div>
+        </div>
+        <div class="graphTimeline" id="graphTimeline"></div>
+        <aside class="cardDrawer hidden" id="cardDrawer"></aside>
+      </section>
+      <!-- 面板页（插件 / 自动化 / 智能体团队 / 设置…）占中栏，
+           左栏只负责导航，不跟着页面一起变形。 -->
+      <div class="panelHost hidden" id="panelHost"></div>
+
+    <footer class="composer" id="composer">
+      <div class="pendingHost" id="pendingHost"></div>
+      <div class="todosHost hidden" id="todosHost"></div>
+
+      <!-- 提示词优化浮层：原文和改写并排看，右边那栏才是要采用的东西。
+           只显示「优化后」的话，用户没有参照，判断不了它到底改了什么。 -->
+      <div class="opt hidden" id="optPanel">
+        <div class="optH">
+          <span class="optTitle">提示词优化</span>
+          <span class="optMeta" id="optMeta"></span>
+          <div class="grow"></div>
+          <button class="optX" id="optClose" title="关掉（不会改动输入框）">✕</button>
+        </div>
+        <div class="optB">
+          <!-- 两行控制，照设计稿：优化对象（改谁）+ 期望效果（改成什么样，可多选）。
+               为什么是两行而不是一行：它们是两个独立的问题 ——
+               「这段话是给用户看的还是当系统提示词的」和「我想让它更短还是更结构化」
+               互相不决定对方。 -->
+          <div class="optTune">
+            <div class="optTuneCol">
+              <div class="optLbl">优化对象</div>
+              <div class="optSegs" id="optTarget"></div>
+            </div>
+            <div class="optTuneCol grow">
+              <div class="optLbl">期望效果</div>
+              <div class="optGoals" id="optGoals"></div>
+            </div>
+          </div>
+          <div class="optTpl">
+            <span class="optTplLbl">改法</span>
+            <div class="optSegs" id="optSegs"></div>
+          </div>
+          <div class="optCmp">
+            <div class="optPane">
+              <div class="optPaneH">原文 <span id="optOrigChars"></span></div>
+              <div class="optTxt" id="optOrig"></div>
+            </div>
+            <div class="optPane">
+              <div class="optPaneH">优化后 <span id="optNewChars"></span></div>
+              <div class="optTxt" id="optBody"></div>
+            </div>
+          </div>
+          <div class="optVar hidden" id="optVar">
+            <span class="ovTick">✓</span>原话里的 <b>{{变量}}</b> 原样保留了
+          </div>
+          <div class="optWarn hidden" id="optWarn"></div>
+          <div class="optJudge hidden" id="optJudge"></div>
+        </div>
+        <div class="optF">
+          <span class="optVer" id="optVer"></span>
+          <div class="grow"></div>
+          <button class="optBtn" id="judgeBtn" title="让模型当裁判，对比原话和改写">评审</button>
+          <!-- 存为收藏：改写出来的好句子，下次还想用。设计稿把它放在「再改一次」旁边 ——
+               它是这一版最可能被重复使用的产物。 -->
+          <button class="optBtn" id="optSave" title="把这一版存进提示词库">存为收藏</button>
+          <button class="optBtn" id="optRetry">再改一次</button>
+          <button class="optBtn pri" id="optApply">用这个</button>
+        </div>
+      </div>
+
+      <div class="atPop hidden" id="atPop"></div>
+
+      <!-- 「＋」菜单：往输入框里塞东西的动作。技能浮层从这儿进。 -->
+      <div class="plusPop hidden" id="plusPop"></div>
+
+      <!-- 技能选择浮层：点「技能」按钮在输入框上方展开，选中的进下面的 chips -->
+      <div class="skillPop hidden" id="skillPop"></div>
+
+      <!-- 这一轮挂了哪些技能。发送成功后清空 —— 技能只对一轮有效，
+           一直挂在输入框上会让人以为「以后每句都带着」。 -->
+      <div class="skillChips hidden" id="skillChips"></div>
+
+      <!-- 这句话里点了谁：@ 角色 / @ 专家 / @ 文件。
+           设计稿 A3 的第二态 —— 打出来的 @ 变成彩色 chip，点 × 就从句子里摘掉。 -->
+      <div class="refChips hidden" id="refChips"></div>
+
+      <!-- 输入区：一个整块（`.composerBox`），里面两行。
+           第一行说话 + 右侧三个动作（技能 / 优化 / 发送），
+           第二行是「这一句在什么条件下发出去」—— 内核、思考档、权限，三个胶囊。
+           这些原来散在顶栏，离手太远：改一句的思考档要抬头看右上角，改完再低头。
+           设计稿把它们收进输入框下沿，因为它们修饰的就是这一句话。 -->
+      <!-- 一个整块：第一行说话 + 「＋」+ 发送；第二行是这一句话的条件
+           （内核 / 思考档 / 权限）外加「提示词优化」。设计稿把「＋」和发送做成两枚圆，
+           技能、文件、专家都收进「＋」菜单里 —— 输入框上少两个按钮，工具栏就干净了。 -->
+      <div class="composerBox">
+        <div class="crow1">
+          <div class="inputWrap">
+            <textarea id="input" rows="1" placeholder=""></textarea>
+            <!-- 占位文字要能分色（@ / & 是黄字），`placeholder` 属性做不到，
+                 所以铺一层真 DOM：输入框空着的时候露出来，一打字就收掉。 -->
+            <div class="ph" id="phHint">发消息，或 <b>@ 选角色</b> / <b>/ 调命令</b> / <b>&amp; 挂技能</b> —— 回车发送</div>
+          </div>
+          <button class="circ" id="skillBtn" title="加东西：文件 / 技能 / 专家（Alt+S）">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+          </button>
+          <button class="send" id="sendBtn" title="发送（Enter）">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="danger hidden" id="stopBtn">停下</button>
+        </div>
+        <div class="cbar">
+          <button class="cChip" id="engineBtn" title="底层内核（新会话生效）">
+            <span class="engDot" id="engineDot"></span><span id="engineLabel">Role 1</span><i class="caret"></i>
+          </button>
+          <button class="cChip" id="thinkBtn" title="深度思考（思考等级）">
+            <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M9 4a3 3 0 00-3 3 3 3 0 00-1 5.8A3 3 0 008 18h1V4zM15 4a3 3 0 013 3 3 3 0 011 5.8A3 3 0 0116 18h-1V4z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            <span id="thinkLabel">不思考</span><i class="caret"></i>
+          </button>
+          <button class="cChip" id="permBtn" title="权限档位">
+            <span class="dot" id="permDot"></span><span id="permLabel">标准</span><i class="caret"></i>
+          </button>
+          <!-- 只有输入框里有字的时候才点亮：没话可改的时候点它，是在点一个空动作。 -->
+          <button class="optr" id="optBtn" title="把这句话改得更清楚（Alt+O）">
+            <svg viewBox="0 0 24 24" width="12" height="12"><path d="M12 3l1.6 4.6L18 9.2l-4.4 1.6L12 15l-1.6-4.2L6 9.2l4.4-1.6z" fill="currentColor"/></svg>
+            提示词优化 <span class="k">Alt+O</span>
+          </button>
+          <div class="grow"></div>
+          <span class="sbHint">⇧↵ 换行</span>
+          <span class="sbHint" id="ctxHint"></span>
+        </div>
+      </div>
+      <!-- 状态条在中栏底部、输入框外面：左边是这一条会话的账，右边是它的总量。 -->
+      <div class="statusBar" id="composerHint">
+        <span id="chatInfo"></span>
+        <span class="grow"></span>
+        <span id="usageHint"></span>
+      </div>
+    </footer>
+
+      <!-- 输出 / 日志抽屉（设计稿 dialogs-v1 C 段）。
+           挂在中栏最底下、输入区下面：它是「窗口级」的一条，
+           夹在对话流和输入框之间的话，会读成「又一条工具栏」，
+           而且把「我说的话」和「它的回答」从中间断开。
+           折叠时只占 34px，但这一行是有内容的：几件在跑、几条日志、最后一条是什么。
+           这三件事以前只在各自那一屏露一下脸，跑完就消失 —— 出问题想回看只能翻对话流。 -->
+      <section class="logDock" id="logDock">
+        <button class="dockBar" id="dockBar" aria-expanded="false" aria-controls="dockBody">
+          <span class="dockLive" id="dockLive"></span>
+          <span class="dockSum" id="dockSum">日志 0 条</span>
+          <span class="dockGrow"></span>
+          <span class="dockToggleTxt" id="dockToggleTxt">展开 ∧</span>
+        </button>
+        <div class="dockBody hidden" id="dockBody">
+          <div class="dockHead" id="dockHead"></div>
+          <div class="dockFilters" id="dockFilters"></div>
+          <div class="dockLogs" id="dockLogs"></div>
+          <div class="dockFoot" id="dockFoot"></div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="drawer hidden" id="artPanel"></aside>
+
+    <!-- 右栏：这一屏的几张卡（交付物 / 计划 / 概览 / 本会话）。
+         设计稿里它是常驻的一列，不是「点一下从右边飘出来」——
+         产物、计划这些东西是要一边干活一边瞄的，飘出来就等于要来回点。 -->
+    <aside class="rpanel" id="rpanel" aria-label="这一屏的卡片">
+      <!-- 顶上这一排是「只看哪一类」。第一个是全部，后面几个各自只留一张卡。
+           点哪个，下面那一列就只剩它 —— 不是又开一层面板。 -->
+      <div class="rhead" id="rhead">
+        <button class="rtab on" data-card="all" title="全部卡片">
+          <svg viewBox="0 0 24 24" width="14" height="14"><path d="M4 7h16M4 12h16M4 17h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <button class="rtab" data-card="art" title="交付物">
+          <svg viewBox="0 0 24 24" width="14" height="14"><path d="M6 3h7l5 5v13H6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13 3v5h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="rtab" data-card="plan" title="计划 / 步骤">
+          <svg viewBox="0 0 24 24" width="14" height="14"><rect x="4" y="4" width="6" height="6" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="4" width="6" height="6" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="4" y="14" width="6" height="6" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="6" height="6" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+        </button>
+        <button class="rtab" data-card="run" title="后台 / 终端">
+          <svg viewBox="0 0 24 24" width="14" height="14"><rect x="3.5" y="5" width="17" height="14" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7 10l2.4 2L7 14M12 15h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="rtab" data-card="ov" title="概览">
+          <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3.8 12h16.4M12 3.8c4.4 4.6 4.4 11.8 0 16.4-4.4-4.6-4.4-11.8 0-16.4z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        </button>
+        <div class="grow"></div>
+        <button class="rmini" id="rpanelFold" title="收起右栏">
+          <svg viewBox="0 0 24 24" width="13" height="13"><path d="M15 6l-5 6 5 6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <div class="rcards" id="rcards"></div>
+    </aside>
+
+  </div>
+
+</div>
+
+<div class="palette hidden" id="palette">
+  <div class="palCard">
+    <input class="palInput" id="palInput" placeholder="搜索会话，或者切模式、开面板…" autocomplete="off" />
+    <div class="palList" id="palList"></div>
+    <div class="palFoot">
+      <span><kbd>↑</kbd><kbd>↓</kbd> 选 · <kbd>Enter</kbd> 确认 · <kbd>Esc</kbd> 关掉</span>
+      <span class="grow"></span>
+      <span><kbd>Ctrl</kbd>+<kbd>K</kbd></span>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="modal">
+  <div class="modalCard" id="modalCard"></div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* 出错必须看得见，但要分两种。
+ *
+ * 打包成桌面窗口之后没有控制台：JS 里只要抛一个异常，用户面前就是一整块黑，
+ * 现场连一句线索都没有 —— 这正是「双击启动不了」最难查的地方。
+ * 所以第一件事就是装上兜底。但兜底分两层：
+ *
+ *   启动阶段（bootstrap 还没走完）→ 整页红屏。这时候界面本来就没有，
+ *     把错误画满屏是对的：宁可难看，也要让人截得到图、念得出字。
+ *   运行阶段（__dreamroleReady 之后）→ 顶部一条窄错误带，可展开看栈、可关掉。
+ *     界面是好的，只是某一下操作失败了；因为一个按钮出错就把整块界面盖成
+ *     报错页，等于让用户以为整个软件坏了 —— 那比错误本身更糟。
+ *
+ * 正常运行时这段代码一个像素都不画。
+ */
+(function () {
+  var fatalShown = false;
+  var bar = null;
+  var count = 0;
+
+  function ready() {
+    return window.__dreamroleReady === true;
+  }
+
+  function fatal(what, detail) {
+    if (fatalShown) return;
+    fatalShown = true;
+    var box = document.createElement('div');
+    box.id = 'fatalBox';
+    box.setAttribute('style', [
+      'position:fixed', 'inset:0', 'z-index:99999', 'overflow:auto',
+      'background:#140f10', 'color:#ffd9d9', 'padding:28px 32px',
+      'font:13px/1.7 ui-monospace,Consolas,monospace', 'white-space:pre-wrap'
+    ].join(';'));
+    box.textContent = 'DreamRole 界面没能启动\n\n' + what + '\n\n' + detail +
+      '\n\n把这段发给我就能定位。也可以直接用浏览器打开同一个地址，看是不是只有窗口壳子出问题。';
+    document.body.appendChild(box);
+    document.title = 'DreamRole（启动失败）';
+  }
+
+  /* 运行期：一条带子，不挡内容，不自己消失。
+     自动消失的 toast 不适合放错误 —— 用户一低头，线索就没了。 */
+  function banner(what, detail) {
+    count += 1;
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'errBar';
+      bar.className = 'errBar';
+      bar.innerHTML =
+        '<span class="ebDot">!</span>'
+        + '<div class="ebMain">'
+        + '  <div class="ebTitle"></div>'
+        + '  <div class="ebDetail"></div>'
+        + '</div>'
+        + '<button class="ebMore" type="button">详情</button>'
+        + '<button class="ebClose" type="button" title="关掉这条">×</button>';
+      bar.querySelector('.ebClose').onclick = function () {
+        bar.remove();
+        bar = null;
+        count = 0;
+      };
+      bar.querySelector('.ebMore').onclick = function () {
+        var open = bar.classList.toggle('expanded');
+        this.textContent = open ? '收起' : '详情';
+      };
+      /* 插进 .app 的第一行，用 flex 把内容挤下去。
+         用 position:fixed 盖上去会压住标题栏和右上角那个「产物」按钮 ——
+         报的是个小错，代价却是一整条顶栏点不到。 */
+      var host = document.getElementById('app') || document.body;
+      host.insertBefore(bar, host.firstChild);
+    }
+    bar.querySelector('.ebTitle').textContent =
+      '一次操作出错了' + (count > 1 ? '（第 ' + count + ' 次）' : '') + '：' + what;
+    bar.querySelector('.ebDetail').textContent = detail;
+  }
+
+  function report(what, detail) {
+    if (ready()) banner(what, detail);
+    else fatal(what, detail);
+    if (window.__dreamroleError) window.__dreamroleError(what + ' :: ' + detail);
+    if (window.console && window.console.error) {
+      window.console.error('[dreamrole] ' + what, detail);
+    }
+  }
+
+  window.addEventListener('error', function (event) {
+    // 图片/字体这类资源没加载上不是脚本错误，画满屏报错页是过度反应
+    if (event.target && event.target !== window && event.target.tagName) return;
+    var err = event.error;
+    report('脚本错误：' + (event.message || ''),
+      (err && (err.stack || err.message)) || (event.filename + ':' + event.lineno));
+  });
+  window.addEventListener('unhandledrejection', function (event) {
+    var reason = event.reason;
+    report('未处理的异步错误',
+      (reason && (reason.stack || reason.message)) || String(reason));
+  });
+
+  /* 外壳（desktop.py）也可以用这个主动报错，行为跟未捕获错误一样 */
+  window.__dreamroleFatal = report;
+})();
+</script>
+
+<script>
+/* 告诉外壳「页面真的跑起来了」。
+ *
+ * 外壳等的是这个回执，不是「窗口有没有出现」—— 窗口出现了、页面却是空的，
+ * 是最难受的一种失败：所有检查都在点头，用户面前一片黑。
+ * 等不到回执，外壳会改用普通浏览器窗口打开（desktop.py 里的 open_fallback）。
+ * 用普通浏览器打开时 URL 上没有 boot 参数，这段代码什么都不做。
+ *
+ * 回执分两级：
+ *   boot-ok          脚本跑到了这里（最早，能证明 JS 没有被禁掉）
+ *   boot-ok&ui=1     app.js 里 bootstrap() 走完、界面画出来了（桌面外壳认这一句）
+ */
+(function () {
+  var token = new URLSearchParams(location.search).get('boot');
+  if (!token) return;
+
+  function send(extra) {
+    fetch('/api/boot-ok?t=' + encodeURIComponent(token) + (extra || ''), { cache: 'no-store' })
+      .catch(function () { /* 服务没起来就算了，外壳那边会超时兜底 */ });
+  }
+
+  send('');
+  window.__dreamroleRendered = function () { send('&ui=1'); };
+  /* 出错也要回传：桌面窗口没有控制台，用户也没法按 F12 —— 不主动报，
+     这个错误就只存在于用户看不到的地方。外壳会把它写进 logs/dreamrole.log。 */
+  window.__dreamroleError = function (text) {
+    send('&err=' + encodeURIComponent(String(text).slice(0, 1200)));
+  };
+})();
+</script>
+
+<script src="js/api.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/refs.js"></script>
+<script src="js/graph.js"></script>
+<script src="js/panels.js"></script>
+<script src="js/artifacts.js"></script>
+<script src="js/sidebar.js"></script>
+<script src="js/dock.js"></script>
+<script src="js/palette.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

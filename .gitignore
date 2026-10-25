@@ -1,0 +1,33 @@
+# ---- 运行时数据：会话、记忆、改动记录，以及 settings.json 里的 API Key ----
+# 这一行是这份文件存在的首要原因。把 .data 传上去，等于把你的模型 key
+# 和几十条私人对话公开挂在互联网上。
+.data/
+data/
+dist/
+build/
+
+# ---- 构建产物 ----
+*.exe
+*.spec.bak
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+
+# ---- 开发时的临时截图与草稿 ----
+tmp/
+shots/
+*.log
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 本地环境 ----
+.venv/
+venv/
+.env
+.env.*

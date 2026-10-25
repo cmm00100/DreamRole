@@ -1,0 +1,9 @@
+# 仓库里一律存 LF。Windows 上有些编辑器默认写 CRLF，
+# 不统一的话每次改一行都会显示「整份文件都变了」—— 这个坑 DESIGN.md 里记过。
+* text=auto eol=lf
+
+# 二进制，别让 git 试图做行尾转换
+*.png binary
+*.ico binary
+*.exe binary
+*.jpg binary
